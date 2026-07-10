@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jump Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    padding: 24px;
+    background: linear-gradient(to top, #081223 0%, #04061b 55%, #000 100%);
+    color: #fff;
+    font-family: 'Segoe UI', 'Courier New', monospace;
+  }
+  h1 { font-size: 40px; letter-spacing: 4px; color: #ffdd00; text-shadow: 0 0 18px rgba(255,200,0,0.5); }
+  .sub { font-size: 13px; color: #8ea0c0; letter-spacing: 1px; margin-top: -18px; }
+  .cards { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+  a.card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 220px;
+    height: 150px;
+    text-decoration: none;
+    color: #fff;
+    background: rgba(0,0,0,0.55);
+    border: 2px solid rgba(255,255,255,0.18);
+    border-radius: 16px;
+    transition: transform .15s, border-color .15s, box-shadow .15s;
+  }
+  a.card:hover { transform: translateY(-4px); border-color: #4455ff; box-shadow: 0 8px 26px rgba(68,85,255,0.35); }
+  a.card .emoji { font-size: 46px; }
+  a.card .title { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
+  a.card .desc { font-size: 11px; color: #9fb0cf; }
+  footer { font-size: 11px; color: #55637d; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>JUMP MAP</h1>
+  <p class="sub">아무 기기에서나 브라우저로 접속하세요</p>
+  <div class="cards">
+    <a class="card" href="./siwoo/jumpmap.html">
+      <span class="emoji">🗺️</span>
+      <span class="title">점프맵</span>
+      <span class="desc">Jump Map</span>
+    </a>
+    <a class="card" href="./fps/fps.html">
+      <span class="emoji">🧟</span>
+      <span class="title">좀비 디펜스 FPS</span>
+      <span class="desc">Zombie Defense</span>
+    </a>
+  </div>
+  <footer>Hosted on GitHub Pages</footer>
+</body>
+</html>
