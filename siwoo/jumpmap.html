@@ -24,6 +24,17 @@ body{background:linear-gradient(to top, #081223 0%, #04061b 55%, #000 100%);over
 #overlay p.legend{font-size:12px;line-height:1.8;display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:center;}
 #overlay p.legend span{white-space:nowrap;}
 #startbtn{padding:12px 38px;background:#4455ff;border:none;border-radius:10px;color:#fff;font-size:16px;font-weight:bold;cursor:pointer;font-family:inherit;}
+#settingsBtn{display:none;position:fixed;top:14px;right:14px;z-index:31;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.25);border-radius:12px;padding:8px 14px;color:#fff;font-size:14px;cursor:pointer;letter-spacing:1px;user-select:none;}
+body.menu #settingsBtn{display:block;}
+#settingsModal{display:none;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,0.74);align-items:center;justify-content:safe center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:20px 12px;}
+#settingsModal.show{display:flex;flex-direction:column;}
+.setbox{width:min(420px,94vw);background:#0c1226;border:2px solid rgba(120,170,255,0.35);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:8px;color:#fff;}
+.setbox h2{font-size:22px;color:#9fc0ff;letter-spacing:2px;text-align:center;}
+.set-sec{font-size:12px;color:#8ea0c0;margin-top:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:4px;}
+.set-row{display:flex;align-items:center;justify-content:space-between;font-size:15px;padding:7px 2px;cursor:pointer;}
+.set-row input{width:22px;height:22px;accent-color:#4c7dff;cursor:pointer;flex:none;}
+#setClose{margin-top:14px;padding:11px;background:#4455ff;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:bold;cursor:pointer;font-family:inherit;}
+.tbtn.off{opacity:0.28;filter:grayscale(0.85);}
 #startbtn:hover{background:#5566ff;}
 #winscreen{position:fixed;inset:0;background:radial-gradient(ellipse at center, rgba(50,38,0,0.92), rgba(0,0,0,0.95));display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;z-index:20;text-align:center;}
 #winscreen h1{font-size:42px;letter-spacing:4px;color:#ffd700;text-shadow:0 0 18px rgba(255,200,0,0.6);}
@@ -60,7 +71,7 @@ body.freelook #freehint{opacity:1;}
 #audio-ind{position:fixed;bottom:16px;left:16px;color:rgba(255,255,255,0.42);font-size:20px;cursor:pointer;z-index:8;user-select:none;transition:color .2s;}
 #audio-ind:hover{color:rgba(255,255,255,0.85);}
 /* ── 모바일 터치 컨트롤(터치 기기에서만 표시) ── */
-#rainveil{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;background:radial-gradient(ellipse at 50% 25%, rgba(40,60,95,0) 35%, rgba(10,20,38,0.6) 100%);will-change:opacity;}
+#rainveil{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;background:linear-gradient(to bottom, rgba(12,20,34,0.55) 0%, rgba(20,28,46,0.32) 100%);will-change:opacity;}
 #touch{position:fixed;inset:0;z-index:9;pointer-events:none;display:none;}
 body.touch #touch{display:block;}
 body.touch #ctrl{display:none;}
@@ -152,6 +163,21 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 <div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인20)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
 <div id="flash"></div>
 <div id="rainveil"></div>
+<div id="settingsBtn" title="설정">⚙ 설정</div>
+<div id="settingsModal">
+  <div class="setbox">
+    <h2>⚙ 설정</h2>
+    <div class="set-sec">능력 (끄면 해당 키·버튼 비활성화)</div>
+    <label class="set-row"><span>🪂 글라이드 (Q)</span><input type="checkbox" data-gs="glide"></label>
+    <label class="set-row"><span>⏫ 점프 장치 (E)</span><input type="checkbox" data-gs="jump"></label>
+    <label class="set-row"><span>🚀 비행 (Z)</span><input type="checkbox" data-gs="fly"></label>
+    <label class="set-row"><span>🐢 슬로우 (C)</span><input type="checkbox" data-gs="slow"></label>
+    <label class="set-row"><span>🛗 엘리베이터 (R)</span><input type="checkbox" data-gs="elev"></label>
+    <div class="set-sec">환경</div>
+    <label class="set-row"><span>🌧️ 비 효과</span><input type="checkbox" data-gs="rain"></label>
+    <button id="setClose">닫기</button>
+  </div>
+</div>
 <div id="pickup"></div>
 <div id="mission-hud"></div>            <!-- 미션 HUD 추가 -->
 <div id="mission-pop"></div>            <!-- 미션 완료 알림 추가 -->
@@ -2346,6 +2372,23 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 </script>
 <script>
 const canvas = document.getElementById('c');
+/* -- settings (ability/env on-off) -- */
+const DEF_GS={glide:true,jump:true,fly:true,slow:true,elev:true,rain:true};
+let GS=Object.assign({},DEF_GS);
+try{ GS=Object.assign(GS, JSON.parse(localStorage.getItem('jm_settings')||'{}')); }catch(e){}
+function saveGS(){ try{ localStorage.setItem('jm_settings', JSON.stringify(GS)); }catch(e){} }
+function gateAbil(k,fn,label){ if(GS[k]===false){ if(typeof showPickup==='function') showPickup('⚙ '+label+' — 설정에서 꺼짐'); return; } fn(); }
+function applyAbilUI(){ const map={glide:'tb-glide',jump:'tb-jb',fly:'tb-fly',slow:'tb-slow',elev:'tb-elev'}; for(const k in map){ const el=document.getElementById(map[k]); if(el) el.classList.toggle('off', GS[k]===false); } }
+function openSettings(){ const m=document.getElementById('settingsModal'); if(!m) return; m.querySelectorAll('input[data-gs]').forEach(cb=>{ cb.checked = GS[cb.dataset.gs]!==false; }); m.classList.add('show'); }
+function closeSettings(){ const m=document.getElementById('settingsModal'); if(m) m.classList.remove('show'); }
+(function initSettings(){
+  const sb=document.getElementById('settingsBtn'); if(sb) sb.addEventListener('click',openSettings);
+  const sc=document.getElementById('setClose'); if(sc) sc.addEventListener('click',closeSettings);
+  const m=document.getElementById('settingsModal');
+  if(m){ m.addEventListener('click',e=>{ if(e.target===m) closeSettings(); });
+    m.querySelectorAll('input[data-gs]').forEach(cb=>{ cb.addEventListener('change',()=>{ GS[cb.dataset.gs]=cb.checked; saveGS(); applyAbilUI(); }); }); }
+  applyAbilUI();
+})();
 
 // webgl2 → webgl → experimental-webgl 순으로 시도, 매번 failIfMajorPerformanceCaveat:false로 성능 경고 때문에 막히지 않게 함
 function acquireGLContext(canvas){
@@ -3026,10 +3069,10 @@ function updateSky(){
   landGroup.visible = landOp>0.01;
   if(landOp>0.01) landGroup.traverse(o=>{ if(o.isMesh) o.material.opacity=landOp; });
   // 비: 지구권(t<0.3)에서만 가끔 — 토글식 날씨
-  if(t<0.3){
+  if(t<0.3 && GS.rain!==false){
     if(--rainTimer<=0){
       rainTarget = rainTarget>0.5 ? 0 : 1;
-      rainTimer  = rainTarget>0.5 ? (540+Math.random()*780|0) : (780+Math.random()*1500|0);  // 비 9~22초 / 갬 13~38초
+      rainTimer  = rainTarget>0.5 ? (900+Math.random()*600|0) : (9000+Math.random()*4200|0);  // 비 15~25초 / 갬 약 150~220초(3분 간격)
     }
   } else rainTarget=0;
   rainLevel += (rainTarget-rainLevel)*0.012;
@@ -3821,11 +3864,11 @@ document.addEventListener('keydown',e=>{
     doJump();
     e.preventDefault();
   }
-  if(e.code==='KeyQ') useGlide();
-  if(e.code==='KeyE') useJump();
-  if(e.code==='KeyZ') useFly();
-  if(e.code==='KeyC') useSlow();
-  if(e.code==='KeyR') useElevator();
+  if(e.code==='KeyQ') gateAbil('glide',useGlide,'글라이드');
+  if(e.code==='KeyE') gateAbil('jump',useJump,'점프 장치');
+  if(e.code==='KeyZ') gateAbil('fly',useFly,'비행');
+  if(e.code==='KeyC') gateAbil('slow',useSlow,'슬로우');
+  if(e.code==='KeyR') gateAbil('elev',useElevator,'엘리베이터');
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
@@ -3865,11 +3908,11 @@ if(IS_TOUCH){
     el.addEventListener('mousedown',e=>{ e.preventDefault(); fn(); });                      // PC ?touch 미리보기/터치스크린 클릭
     el.addEventListener('contextmenu',e=>e.preventDefault()); }
   bindBtn('tb-jump',()=>doJump());
-  bindBtn('tb-glide',useGlide);
-  bindBtn('tb-jb',useJump);
-  bindBtn('tb-fly',useFly);
-  bindBtn('tb-slow',useSlow);
-  bindBtn('tb-elev',useElevator);
+  bindBtn('tb-glide',()=>gateAbil('glide',useGlide,'글라이드'));
+  bindBtn('tb-jb',()=>gateAbil('jump',useJump,'점프 장치'));
+  bindBtn('tb-fly',()=>gateAbil('fly',useFly,'비행'));
+  bindBtn('tb-slow',()=>gateAbil('slow',useSlow,'슬로우'));
+  bindBtn('tb-elev',()=>gateAbil('elev',useElevator,'엘베'));
   bindBtn('tb-shop',()=>{ if(paused) closeShop(); else openShop(); });
 }
 
@@ -4787,7 +4830,7 @@ function updateAudio(){
     birdT=120+(Math.random()*200|0);    // 약 2~5초 간격
   }
   // 빗소리: rainLevel(지상 한정 날씨)에 비례
-  if(rainAudioGain) rainAudioGain.gain.setTargetAtTime((typeof rainLevel!=='undefined'?rainLevel:0)*0.2, now, 0.5);
+  if(rainAudioGain) rainAudioGain.gain.setTargetAtTime((typeof rainLevel!=='undefined'?rainLevel:0)*0.08, now, 0.5);
   // 지진 우르릉: 지진 모드에서만
   // 지진 우르릉 + 용암 부글거림(가까울수록 커짐) — 같은 저음 버스 공유
   let rumble=0;
