@@ -59,6 +59,7 @@ body.freelook #freehint{opacity:1;}
 #audio-ind{position:fixed;bottom:16px;left:16px;color:rgba(255,255,255,0.42);font-size:20px;cursor:pointer;z-index:8;user-select:none;transition:color .2s;}
 #audio-ind:hover{color:rgba(255,255,255,0.85);}
 /* ── 모바일 터치 컨트롤(터치 기기에서만 표시) ── */
+#rainveil{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;background:radial-gradient(ellipse at 50% 25%, rgba(40,60,95,0) 35%, rgba(10,20,38,0.6) 100%);will-change:opacity;}
 #touch{position:fixed;inset:0;z-index:9;pointer-events:none;display:none;}
 body.touch #touch{display:block;}
 body.touch #ctrl{display:none;}
@@ -149,6 +150,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 <div id="lava-hud" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);display:none;font-weight:800;font-size:15px;letter-spacing:1px;color:#ffce8a;text-shadow:0 0 10px rgba(255,80,20,0.9);pointer-events:none;"></div>
 <div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인20)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
 <div id="flash"></div>
+<div id="rainveil"></div>
 <div id="pickup"></div>
 <div id="mission-hud"></div>            <!-- 미션 HUD 추가 -->
 <div id="mission-pop"></div>            <!-- 미션 완료 알림 추가 -->
@@ -2813,6 +2815,7 @@ rainMat.fog=false;
 const rain=new THREE.LineSegments(rainGeo, rainMat);
 rain.frustumCulled=false; rain.visible=false; scene.add(rain);
 let rainLevel=0, rainTarget=0, rainTimer=320;
+const rainVeilEl=document.getElementById('rainveil');
 
 // (2) 발 아래 지구 — 고정 위치라 올라갈수록 멀어져 작아짐(=지구에서 멀어지는 연출). 어느 정도 올라가야 등장
 // 절차적 지구 텍스처(외부 이미지 없이 캔버스로 대륙/바다/빙하/사막 + 구름층 생성)
@@ -3031,6 +3034,7 @@ function updateSky(){
   rainLevel += (rainTarget-rainLevel)*0.012;
   const rainShow = rainLevel>0.015;
   rain.visible = rainShow;
+  if(rainVeilEl && !rainShow) rainVeilEl.style.opacity = 0;
   if(rainShow){
     rain.position.copy(camera.position);
     for(let i=0;i<RAIN_N;i++){
@@ -3039,7 +3043,8 @@ function updateSky(){
       else { rainArr[i*6+1]=y0; rainArr[i*6+4]=y0-RAIN_STREAK; }
     }
     rainGeo.attributes.position.needsUpdate=true;
-    rainMat.opacity = Math.min(1,rainLevel)*0.55*cl(1-t/0.3);
+    rainMat.opacity = Math.min(1,rainLevel)*0.85*cl(1-t/0.3);
+    if(rainVeilEl) rainVeilEl.style.opacity = Math.min(1,rainLevel)*0.5*cl(1-t/0.3);
   }
   // 바다 + 윤슬: 지상에서만(t<0.4), 수평선 색은 지평선 헤이즈와 맞춤
   seaUniforms.uTime.value = tick*0.016;
@@ -4781,7 +4786,7 @@ function updateAudio(){
     birdT=120+(Math.random()*200|0);    // 약 2~5초 간격
   }
   // 빗소리: rainLevel(지상 한정 날씨)에 비례
-  if(rainAudioGain) rainAudioGain.gain.setTargetAtTime((typeof rainLevel!=='undefined'?rainLevel:0)*0.13, now, 0.5);
+  if(rainAudioGain) rainAudioGain.gain.setTargetAtTime((typeof rainLevel!=='undefined'?rainLevel:0)*0.2, now, 0.5);
   // 지진 우르릉: 지진 모드에서만
   // 지진 우르릉 + 용암 부글거림(가까울수록 커짐) — 같은 저음 버스 공유
   let rumble=0;
