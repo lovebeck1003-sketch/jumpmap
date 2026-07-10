@@ -2383,7 +2383,7 @@ if(!renderer){
     + '</div>';
   throw new Error('WebGL context unavailable');
 }
-renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));   // 모바일 최적화: 픽셀 비율 상한(3→1.5)으로 렌더 부하 대폭 절감
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;     // 부드러운 그림자
@@ -2442,7 +2442,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.18));
 const sun = new THREE.DirectionalLight(0xfff4e6, 1.0);
 sun.position.set(15,40,15);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048,2048);
+sun.shadow.mapSize.set(1024,1024);   // 모바일 최적화: 그림자 해상도 절반(2048→1024)
 sun.shadow.camera.left=-80; sun.shadow.camera.right=80;
 sun.shadow.camera.top=80; sun.shadow.camera.bottom=-80;
 sun.shadow.camera.far=250;
