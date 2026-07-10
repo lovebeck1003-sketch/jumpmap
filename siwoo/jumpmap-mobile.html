@@ -25,6 +25,8 @@ body{background:linear-gradient(to top, #081223 0%, #04061b 55%, #000 100%);over
 #startbtn{padding:12px 38px;background:#4455ff;border:none;border-radius:10px;color:#fff;font-size:16px;font-weight:bold;cursor:pointer;font-family:inherit;}
 #settingsBtn{display:none;position:fixed;top:14px;right:14px;z-index:31;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.25);border-radius:12px;padding:8px 14px;color:#fff;font-size:14px;cursor:pointer;letter-spacing:1px;user-select:none;}
 body.menu #settingsBtn{display:block;}
+#fsBtn{display:none;position:fixed;top:14px;left:14px;z-index:31;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.25);border-radius:12px;padding:6px 12px;color:#fff;font-size:18px;cursor:pointer;user-select:none;line-height:1;}
+body.touch.menu #fsBtn{display:block;}
 #settingsModal{display:none;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,0.74);align-items:center;justify-content:safe center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:20px 12px;}
 #settingsModal.show{display:flex;flex-direction:column;}
 .setbox{width:min(420px,94vw);background:#0c1226;border:2px solid rgba(120,170,255,0.35);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:8px;color:#fff;}
@@ -163,6 +165,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 <div id="flash"></div>
 <div id="rainveil"></div>
 <div id="settingsBtn" title="설정">⚙ 설정</div>
+<div id="fsBtn" title="전체화면">⛶</div>
 <div id="settingsModal">
   <div class="setbox">
     <h2>⚙ 설정</h2>
@@ -2387,6 +2390,15 @@ function closeSettings(){ const m=document.getElementById('settingsModal'); if(m
   if(m){ m.addEventListener('click',e=>{ if(e.target===m) closeSettings(); });
     m.querySelectorAll('input[data-gs]').forEach(cb=>{ cb.addEventListener('change',()=>{ GS[cb.dataset.gs]=cb.checked; saveGS(); applyAbilUI(); }); }); }
   applyAbilUI();
+})();
+/* -- fullscreen (mobile) -- */
+function fsEl(){ return document.fullscreenElement || document.webkitFullscreenElement; }
+function reqFS(){ const e=document.documentElement; const fn=e.requestFullscreen||e.webkitRequestFullscreen; if(fn && !fsEl()){ try{ fn.call(e); }catch(err){} } }
+function exitFS(){ const fn=document.exitFullscreen||document.webkitExitFullscreen; if(fn && fsEl()){ try{ fn.call(document); }catch(err){} } }
+function toggleFS(){ if(fsEl()) exitFS(); else reqFS(); }
+(function initFS(){
+  const fb=document.getElementById('fsBtn'); if(fb) fb.addEventListener('click',toggleFS);
+  const sb=document.getElementById('startbtn'); if(sb) sb.addEventListener('click',()=>{ if(document.body.classList.contains('touch')) reqFS(); });
 })();
 
 // webgl2 → webgl → experimental-webgl 순으로 시도, 매번 failIfMajorPerformanceCaveat:false로 성능 경고 때문에 막히지 않게 함
