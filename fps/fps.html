@@ -1,0 +1,3431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>좀비 디펜스 FPS</title>
+  <style>
+    /* ===== 화면 꾸미기 (CSS) ===== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+    canvas { display: block; }
+
+    /* 가운데 조준점 (십자) — 쏠 때 살짝 벌어짐(bloom) */
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      width: 24px; height: 24px;
+      transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 10;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: var(--ch-color, #fff);
+      box-shadow: 0 0 2px #000;
+    }
+    #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+    #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+
+    /* 위쪽 정보(HUD) */
+    #hud {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      color: #fff; text-shadow: 1px 1px 3px #000;
+      font-size: 20px; line-height: 1.6; pointer-events: none;
+    }
+    #hud .big { font-size: 28px; font-weight: bold; }
+    #hud .coin { color: #ffe45c; font-weight: bold; }
+
+    /* 체력바 */
+    #healthbarWrap {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      width: 320px; height: 22px; background: rgba(0,0,0,0.5);
+      border: 2px solid #fff; border-radius: 12px; z-index: 10; overflow: hidden;
+    }
+    #healthbar { width: 100%; height: 100%; background: linear-gradient(#5cff6a,#1ea83a); transition: width .15s; }
+
+    /* 총알 표시 */
+    #ammo {
+      position: fixed; bottom: 24px; right: 24px; z-index: 10;
+      color: #fff; text-shadow: 1px 1px 3px #000; font-size: 24px; font-weight: bold;
+      text-align: right; line-height: 1.3;
+    }
+    #ammo .wname { color: #ffe45c; font-size: 18px; }
+
+    /* 화면 가운데 안내 창 (시작/게임오버/상점) */
+    .overlay {
+      position: fixed; inset: 0; z-index: 20;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.78); color: #fff; text-align: center; gap: 16px;
+      overflow-y: auto; padding: 30px;
+    }
+    .overlay h1 { font-size: 46px; }
+    .overlay p { font-size: 20px; line-height: 1.7; opacity: 0.9; }
+    .overlay button.main {
+      font-size: 22px; padding: 14px 40px; border: none; border-radius: 30px;
+      background: #1ea83a; color: #fff; cursor: pointer; font-weight: bold;
+    }
+    .overlay button.main:hover { background: #28c94a; }
+    .hidden { display: none !important; }
+
+    /* ===== 상점 카드 ===== */
+    .shop-section-title { width: 100%; text-align: center; color: #fff; font-size: 20px; opacity: .85; margin: 8px 0 2px; }
+    .shop-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 920px; }
+    .shop-card {
+      width: 175px; padding: 14px; background: #2a3a4a; border: 2px solid #4a7c9a;
+      border-radius: 14px; color: #fff; display: flex; flex-direction: column;
+      gap: 6px; align-items: center;
+    }
+    .shop-card .emoji { font-size: 36px; }
+    .shop-card .gunimg { width: 100%; height: 60px; object-fit: contain; margin: 2px 0; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+    .shop-card .rname { font-size: 19px; font-weight: bold; color: #ffe45c; }
+    .shop-card .rdesc { font-size: 13px; opacity: .9; line-height: 1.35; min-height: 36px; }
+    .shop-card .price { font-size: 14px; color: #9fe0ff; }
+    .shop-card button {
+      margin-top: 6px; padding: 9px 14px; border: none; border-radius: 10px;
+      background: #1ea83a; color: #fff; font-weight: bold; cursor: pointer; font-size: 14px;
+    }
+    .shop-card button:hover { filter: brightness(1.12); }
+    .shop-card button.cant { background: #7a3b3b; cursor: not-allowed; }
+    .shop-card button.equipped { background: #888; cursor: default; }
+    .shop-card button.equip { background: #2b78c2; }
+
+    /* ===== 설정 화면 ===== */
+    .settings-list { display: flex; flex-direction: column; gap: 16px; width: 400px; max-width: 90vw; text-align: left; }
+    .settings-list label { display: flex; flex-direction: column; gap: 6px; font-size: 17px; }
+    .settings-list label.row { flex-direction: row; align-items: center; justify-content: space-between; }
+    .settings-list input[type=range] { width: 100%; height: 10px; cursor: pointer; }
+    .settings-list input[type=checkbox] { width: 24px; height: 24px; cursor: pointer; }
+    .settings-list input[type=color] { width: 56px; height: 34px; border: none; cursor: pointer; background: none; }
+    .settings-list b { color: #ffe45c; }
+
+    /* 피 맞을 때 빨갛게 번쩍 */
+    #hurt {
+      position: fixed; inset: 0; z-index: 15; pointer-events: none;
+      background: radial-gradient(transparent 40%, rgba(255,0,0,0.55));
+      opacity: 0; transition: opacity .15s;
+    }
+
+    /* 화면 가운데 큰 안내 글자 (준비 카운트다운 등) */
+    #msg {
+      position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 12; pointer-events: none; text-align: center;
+      color: #ffe45c; font-size: 52px; font-weight: bold;
+      text-shadow: 2px 2px 6px #000;
+    }
+
+    /* 저격총 스코프(망원경) 화면 */
+    #scope { position: fixed; inset: 0; z-index: 13; pointer-events: none; display: none; }
+    #scope.on { display: block; }
+    /* 가운데만 동그랗게 보이고 바깥은 까맣게 */
+    #scope .lens { position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0 33vmin, rgba(0,0,0,0.985) 34vmin); }
+    #scope .cv { position: absolute; left: 50%; top: 0; width: 2px; height: 100%; background: rgba(0,0,0,0.85); transform: translateX(-50%); }
+    #scope .ch { position: absolute; top: 50%; left: 0; height: 2px; width: 100%; background: rgba(0,0,0,0.85); transform: translateY(-50%); }
+    #scope .dot { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #c0392b; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 3px #000; }
+
+    /* 웨이브 목표 표시 박스 (화면 위 가운데) */
+    #objBox {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      z-index: 11; text-align: center; color: #fff; pointer-events: none;
+      background: rgba(0,0,0,0.4); padding: 5px 18px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.18); text-shadow: 1px 1px 3px #000;
+      transition: background .15s;
+    }
+    #objBox .ot { font-size: 19px; font-weight: bold; color: #7fd6ff; }
+    #objBox .op { font-size: 16px; opacity: .95; }
+    /* 발전기가 공격받으면 빨갛게 번쩍 */
+    #objBox.gen-hit { background: rgba(200,30,30,0.75); border-color: #ff6a6a; }
+
+    /* 보스 체력바 (화면 위) — 목표 박스와 안 겹치게 살짝 아래로 */
+    #bossbar { position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+      width: 60vw; max-width: 760px; z-index: 11; display: none; text-align: center; }
+    #bossbar.on { display: block; }
+    #bossbar .bbname { color:#ff8a8a; font-weight:bold; font-size:18px; text-shadow:1px 1px 3px #000; margin-bottom:3px; }
+    #bossbar .bbtrack { width:100%; height:20px; background:rgba(0,0,0,0.55); border:2px solid #ff5a5a; border-radius:10px; overflow:hidden; }
+    #bossbar .bbfill { height:100%; width:100%; background:linear-gradient(#ff7a7a,#b01818); transition:width .18s; }
+    #bossbar.weak .bbtrack { border-color:#ffe45c; box-shadow:0 0 16px #ffe45c; }
+    #bossbar.weak .bbname::after { content:' — 약점! 지금 머리를 노려!'; color:#ffe45c; }
+
+    /* 콤보 표시 */
+    #combo { position: fixed; top: 23%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 12; pointer-events:none; color:#ffd23f; font-weight:bold; font-size:38px;
+      text-shadow:2px 2px 6px #000; opacity:0; transition:opacity .18s; }
+
+    /* 화면 중앙 알림(헤드샷/특수좀비/보급 등) */
+    #toast { position: fixed; top: 44%; left:50%; transform:translate(-50%,-50%);
+      z-index:12; pointer-events:none; color:#fff; font-weight:bold; font-size:26px;
+      text-shadow:2px 2px 6px #000; opacity:0; transition:opacity .25s; text-align:center; line-height:1.4; }
+
+    /* 피격 방향 표시 (화면 가장자리 빨강) */
+    .dmgdir { position: fixed; z-index:14; pointer-events:none; opacity:0; transition:opacity .12s; }
+    #dmgT { top:0; left:0; width:100%; height:90px; background:linear-gradient(rgba(255,0,0,.55),transparent); }
+    #dmgB { bottom:0; left:0; width:100%; height:90px; background:linear-gradient(transparent,rgba(255,0,0,.55)); }
+    #dmgL { top:0; left:0; height:100%; width:90px; background:linear-gradient(to right,rgba(255,0,0,.55),transparent); }
+    #dmgR { top:0; right:0; height:100%; width:90px; background:linear-gradient(to left,rgba(255,0,0,.55),transparent); }
+
+    /* 상점 카드 레벨/MAX 표시 */
+    .shop-card .lvl { font-size:13px; color:#9fe0ff; font-weight:bold; }
+    .shop-card button.max { background:#555; cursor:default; }
+    #ammo .reserve { color:#9fe0ff; font-size:18px; }
+
+    /* ⚡ 궁극기 게이지 (총알 표시 아래, 오른쪽 하단) */
+    #ultWrap { position:fixed; right:24px; bottom:96px; z-index:11; width:230px;
+      pointer-events:none; text-align:right; font-weight:bold; color:#ffe45c;
+      text-shadow:1px 1px 4px #000; }
+    #ultLabel { font-size:16px; margin-bottom:3px; }
+    #ultTrack { width:100%; height:14px; background:rgba(0,0,0,.5); border:2px solid #6a5a10;
+      border-radius:8px; overflow:hidden; }
+    #ultFill { width:0%; height:100%; border-radius:6px;
+      background:linear-gradient(90deg,#ffb020,#ffe860); transition:width .12s; }
+    #ultWrap.ready { animation:ultpulse .7s infinite; }
+    #ultWrap.ready #ultLabel::after { content:' (X 발동!)'; color:#fff; }
+    #ultWrap.active #ultLabel { color:#7afcff; }
+    #ultWrap.active #ultFill { background:linear-gradient(90deg,#21d0ff,#a8f0ff); }
+    @keyframes ultpulse { 0%,100%{ filter:brightness(1); } 50%{ filter:brightness(1.7); } }
+    /* 궁극기 발동 순간 황금 번쩍 + 발동 중 화면 가장자리 금빛 테두리 */
+    #ultflash { position:fixed; inset:0; z-index:15; pointer-events:none; opacity:0;
+      transition:opacity .18s; background:radial-gradient(circle at center, rgba(255,240,150,.55), rgba(255,180,40,.25) 60%, transparent 80%); }
+    body.overdrive::after { content:''; position:fixed; inset:0; z-index:9; pointer-events:none;
+      box-shadow:inset 0 0 120px 24px rgba(255,200,60,.45); }
+  </style>
+</head>
+<body>
+  <!-- 조준점 -->
+  <div id="crosshair"></div>
+
+  <!-- 위쪽 정보 -->
+  <div id="hud">
+    <div class="big">🌊 웨이브 <span id="wave">1</span></div>
+    <div class="coin">💰 코인: <span id="coins">0</span></div>
+    <div>💀 처치: <span id="kills">0</span></div>
+    <div>⭐ 점수: <span id="score">0</span></div>
+    <div>🧟 남은 좀비: <span id="left">0</span></div>
+    <div>💣 <span id="gren">3</span>(G) 🔥 <span id="molo">2</span>(F) ❄️ <span id="ice">0</span>(C) ⚡ <span id="flash">0</span>(V)</div>
+  </div>
+
+  <!-- 체력바 -->
+  <div id="healthbarWrap"><div id="healthbar"></div></div>
+
+  <!-- 총알 -->
+  <div id="ammo">
+    <div class="wname" id="weaponName">권총</div>
+    🔫 <span id="ammoNow">12</span> / <span id="ammoMax">12</span><span class="reserve" id="reserve"></span>
+  </div>
+
+  <!-- ⚡ 궁극기(오버드라이브) 게이지 -->
+  <div id="ultWrap"><div id="ultLabel">⚡ 궁극기</div><div id="ultTrack"><div id="ultFill"></div></div></div>
+
+  <!-- 웨이브 목표 표시 -->
+  <div id="objBox" style="display:none"><div class="ot" id="objText">목표</div><div class="op" id="objProg"></div></div>
+
+  <!-- 보스 체력바 (화면 위) -->
+  <div id="bossbar"><div class="bbname" id="bossName">보스</div><div class="bbtrack"><div class="bbfill" id="bossFill"></div></div></div>
+
+  <!-- 콤보 / 중앙 알림 -->
+  <div id="combo"></div>
+  <div id="toast"></div>
+
+  <!-- 피격 방향 표시 -->
+  <div id="dmgT" class="dmgdir"></div>
+  <div id="dmgB" class="dmgdir"></div>
+  <div id="dmgL" class="dmgdir"></div>
+  <div id="dmgR" class="dmgdir"></div>
+
+  <!-- 피 맞을 때 효과 -->
+  <div id="hurt"></div>
+
+  <!-- ⚡ 궁극기 발동 화면 번쩍 -->
+  <div id="ultflash"></div>
+
+  <!-- 저격 스코프 화면 -->
+  <div id="scope">
+    <div class="lens"></div>
+    <div class="cv"></div><div class="ch"></div><div class="dot"></div>
+  </div>
+
+  <!-- 화면 가운데 안내 글자 -->
+  <div id="msg" class="hidden"></div>
+
+  <!-- 시작 화면 -->
+  <div id="startScreen" class="overlay">
+    <h1>🧟 좀비 디펜스</h1>
+    <p>
+      <b>이동:</b> W A S D &nbsp;|&nbsp; <b>둘러보기:</b> 마우스 &nbsp;|&nbsp; <b>점프:</b> Space<br>
+      <b>달리기:</b> Shift &nbsp;|&nbsp; <b>정조준/줌:</b> 마우스 오른쪽 (반동↓)<br>
+      <b>발사:</b> 마우스 왼쪽 (꾹 누르면 연사!) &nbsp;|&nbsp; <b>재장전:</b> R &nbsp;|&nbsp; <b>무기 바꾸기:</b> 숫자 1~7 또는 마우스 휠<br>
+      <b>🔪 칼:</b> Q (이동속도↑) · 좌클릭 빠른 베기 · 우클릭 강한 광역 베기 · T/F 검사 &nbsp;|&nbsp; <b>수류탄:</b> G &nbsp;|&nbsp; <b>화염병:</b> F(칼 외) &nbsp;|&nbsp; <b>얼음:</b> C &nbsp;|&nbsp; <b>섬광:</b> V<br>
+      웨이브마다 <b>목표</b>가 달라져! (좀비 전멸 / 🔋발전기 방어 / 📦보급 회수 / 🔌스위치 / ⏱️생존)<br>
+      웨이브 <b>준비시간</b>에 <b>B</b>키로 총 구매/교체! 머리(헤드샷)를 맞히면 데미지 2배 이상 💥<br>
+      웨이브를 깨면 💰코인으로 <b>상점</b>에서 업그레이드! 5웨이브마다 보스 🔥
+    </p>
+    <button id="startBtn" class="main">클릭해서 시작 ▶</button>
+    <button id="openSettingsBtn" class="main" style="background:#3a4a5a">⚙️ 설정</button>
+    <p style="font-size:15px;opacity:.6">시작하면 마우스가 화면에 잠겨. (ESC 누르면 일시정지)</p>
+  </div>
+
+  <!-- 일시정지 메뉴 (ESC) -->
+  <div id="pauseScreen" class="overlay hidden">
+    <h1>⏸️ 일시정지</h1>
+    <p>웨이브 <b id="pauseWave">1</b> 진행 중<br>💰 코인: <b id="pauseCoins">0</b></p>
+    <button id="resumeBtn" class="main">계속하기 ▶</button>
+    <button id="pauseSettingsBtn" class="main" style="background:#3a4a5a">⚙️ 설정</button>
+    <p style="font-size:15px;opacity:.6">화면을 클릭하거나 계속하기를 누르면 다시 시작돼.</p>
+  </div>
+
+  <!-- 설정 화면 -->
+  <div id="settingsScreen" class="overlay hidden">
+    <h1>⚙️ 설정</h1>
+    <div class="settings-list">
+      <label>🎯 마우스 감도 (발로란트 기준): <b id="sensVal">0.15</b>
+        <input type="range" id="setSens" min="0.05" max="1" step="0.01">
+      </label>
+      <label>🔭 조준(줌) 감도: <b id="adsSensVal">60%</b>
+        <input type="range" id="setAdsSens" min="0.1" max="1" step="0.05">
+      </label>
+      <label>👁️ 시야각 (FOV): <b id="fovVal">75</b>
+        <input type="range" id="setFov" min="60" max="110" step="1">
+      </label>
+      <label>📳 화면 흔들림: <b id="shakeVal">100%</b>
+        <input type="range" id="setShake" min="0" max="2" step="0.1">
+      </label>
+      <label class="row">🔊 효과음 켜기
+        <input type="checkbox" id="setSound">
+      </label>
+      <label class="row">➕ 조준점 색깔
+        <input type="color" id="setColor">
+      </label>
+    </div>
+    <button id="settingsBackBtn" class="main">저장하고 닫기 ▶</button>
+  </div>
+
+  <!-- 상점 화면 -->
+  <div id="shopScreen" class="overlay hidden">
+    <h1>🛒 상점 (업그레이드)</h1>
+    <p>💰 코인: <b id="shopCoins">0</b> &nbsp;—&nbsp; 🔫 총 구매/교체는 게임 중 <b>B</b>키!</p>
+    <div class="shop-section-title">⬆️ 업그레이드</div>
+    <div id="shopUpgrades" class="shop-row"></div>
+    <button id="nextWaveBtn" class="main">다음 웨이브 시작 ▶</button>
+  </div>
+
+  <!-- 🔫 B키 무기 상점 (언제든) -->
+  <div id="weaponShopScreen" class="overlay hidden">
+    <h1>🔫 무기 상점</h1>
+    <p>💰 코인: <b id="wshopCoins">0</b> &nbsp;—&nbsp; <b>B</b> 또는 아래 버튼으로 닫기</p>
+    <div id="wshopWeapons" class="shop-row"></div>
+    <button id="wshopCloseBtn" class="main">계속하기 ▶</button>
+  </div>
+
+  <!-- 게임오버 화면 -->
+  <div id="overScreen" class="overlay hidden">
+    <h1>💀 게임 오버</h1>
+    <p>도달한 웨이브: <b id="finalWave">1</b> · 처치: <b id="finalKills">0</b> · 점수: <b id="finalScore">0</b></p>
+    <p id="finalStats" style="font-size:17px;line-height:1.7"></p>
+    <p id="finalRec" style="font-size:18px;color:#ffe45c;max-width:560px"></p>
+    <button id="restartBtn" class="main">다시 하기 🔄</button>
+  </div>
+
+  <!-- ===== Three.js 불러오기 (3D 게임 라이브러리) ===== -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- ===== 게임 코드 시작 ===== -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+    // ---------- 기본 세팅: 장면, 카메라, 화면 그리기 ----------
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x2a3855);          // 어두운 밤 느낌
+    scene.fog = new THREE.Fog(0x2a3855, 28, 130);          // 멀리는 안개로 흐릿하게 (하늘색과 맞춤)
+
+    const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));   // 고해상도 화면 선명하게
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;        // 부드러운 그림자
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;      // 영화 같은 색감
+    renderer.toneMappingExposure = 1.08;
+    document.body.appendChild(renderer.domElement);
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      gunCam.aspect = innerWidth / innerHeight;
+      gunCam.updateProjectionMatrix();
+    });
+
+    // Ctrl+휠 / Ctrl + +,-,0 으로 브라우저가 확대/축소되는 것 막기 (달리기는 Shift, Ctrl은 게임에서 안 씀)
+    addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    addEventListener('keydown', (e) => {
+      // Ctrl + +,- 확대/축소만 막음. Ctrl+0(배율 100%로 초기화)은 일부러 허용!
+      if ((e.ctrlKey || e.metaKey) && ['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract'].includes(e.code))
+        e.preventDefault();
+    });
+
+    // ---------- 빛 ----------
+    const ambient = new THREE.AmbientLight(0x8090b0, 0.35);          // 은은한 환경광(푸른빛)
+    const hemi = new THREE.HemisphereLight(0x6a7ba0, 0x20242c, 0.55);// 하늘/땅 빛
+    scene.add(ambient); scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xcdd8ff, 1.0);           // 달빛 느낌(살짝 푸른 흰빛)
+    sun.position.set(-60, 90, -40);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);                              // 또렷한 그림자
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 250;
+    sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+    sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+    sun.shadow.bias = -0.0004;
+    scene.add(sun);
+    // 총은 별도 레이어(1)로 그리므로, 조명이 레이어1도 비추게 함
+    [ambient, hemi, sun].forEach(L => L.layers.enable(1));
+
+    // ===== 뷰모델(손/무기) 전용 조명: 카메라에 붙어 레이어1만 비춤 =====
+    // 월드가 밤이라 어두워도 손에 든 칼/총이 검게 뭉개지지 않게 항상 환히 비춘다.
+    // ※ 방향광 target도 카메라 자식으로 둬서 시점이 어디를 봐도 비추는 방향이 고정되게 함.
+    const vmKey  = new THREE.DirectionalLight(0xffffff, 2.7);   // 메인 키 라이트(오른쪽 위 앞)
+    vmKey.position.set(0.6, 0.9, 1.4);
+    const vmFill = new THREE.DirectionalLight(0xbcccff, 0.9);   // 왼쪽 보조광(그림자 메우기)
+    vmFill.position.set(-1.2, -0.1, 0.8);
+    const vmAmb  = new THREE.AmbientLight(0xffffff, 1.05);      // 전체 바닥 밝기
+    [vmKey, vmFill, vmAmb].forEach(L => { L.layers.set(1); camera.add(L); });  // layers.set(1) → 레이어1 외엔 안 비춤(월드에 영향X)
+    [vmKey, vmFill].forEach(L => { L.target.position.set(0, 0, -1); camera.add(L.target); }); // 시점 앞(뷰모델)을 향함
+
+    // ---------- 하늘 / 별 / 달 / 구름 ----------
+    // 그라데이션 밤하늘 돔
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 16; skyCanvas.height = 256;
+    const sctx = skyCanvas.getContext('2d');
+    const skyGrad = sctx.createLinearGradient(0, 0, 0, 256);
+    skyGrad.addColorStop(0, '#0a1228');     // 꼭대기: 깊은 남색
+    skyGrad.addColorStop(0.55, '#1b2945');
+    skyGrad.addColorStop(1, '#3c4c66');     // 지평선: 밝은 회청색
+    sctx.fillStyle = skyGrad; sctx.fillRect(0, 0, 16, 256);
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    const skyDome = new THREE.Mesh(
+      new THREE.SphereGeometry(400, 32, 16),
+      new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
+    );
+    scene.add(skyDome);
+
+    // 별 수백 개 (위쪽 하늘에 뿌리기)
+    const starPos = [];
+    for (let i = 0; i < 700; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI * 0.48;   // 위쪽 반구
+      const r = 380;
+      starPos.push(
+        r * Math.sin(phi) * Math.cos(theta),
+        r * Math.cos(phi),
+        r * Math.sin(phi) * Math.sin(theta)
+      );
+    }
+    const starsGeo = new THREE.BufferGeometry();
+    starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    scene.add(new THREE.Points(starsGeo,
+      new THREE.PointsMaterial({ color: 0xffffff, size: 1.4, sizeAttenuation: false, fog: false })));
+
+    // 달 + 은은한 달무리
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 24, 24),
+      new THREE.MeshBasicMaterial({ color: 0xf6f3df, fog: false }));
+    moon.position.set(-160, 140, -210);
+    scene.add(moon);
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = glowCanvas.height = 128;
+    const gctx = glowCanvas.getContext('2d');
+    const glowGrad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    glowGrad.addColorStop(0, 'rgba(245,243,220,0.5)');
+    glowGrad.addColorStop(1, 'rgba(245,243,220,0)');
+    gctx.fillStyle = glowGrad; gctx.fillRect(0, 0, 128, 128);
+    const moonGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(glowCanvas), transparent: true, fog: false, depthWrite: false }));
+    moonGlow.position.copy(moon.position);
+    moonGlow.scale.set(90, 90, 1);
+    scene.add(moonGlow);
+
+    // 뭉게구름 텍스처 (부드러운 원들을 겹쳐서)
+    function makeCloudTexture() {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 128;
+      const ctx = c.getContext('2d');
+      for (let i = 0; i < 20; i++) {
+        const x = 40 + Math.random() * 176, y = 45 + Math.random() * 45, r = 18 + Math.random() * 42;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, 'rgba(255,255,255,0.5)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+    const cloudTex = makeCloudTexture();
+    const clouds = [];
+    for (let i = 0; i < 16; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: cloudTex, transparent: true, opacity: 0.28 + Math.random() * 0.18,
+        color: 0x9aa3b8, depthWrite: false, fog: false }));
+      const ang = Math.random() * Math.PI * 2, rad = 80 + Math.random() * 200;
+      s.position.set(Math.cos(ang) * rad, 55 + Math.random() * 50, Math.sin(ang) * rad);
+      const sc = 70 + Math.random() * 90;
+      s.scale.set(sc, sc * 0.5, 1);
+      scene.add(s);
+      clouds.push({ sprite: s, speed: 0.6 + Math.random() * 1.8 });
+    }
+
+    // ---------- 바닥과 벽 (싸우는 공간) ----------
+    const ARENA = 45;
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(ARENA * 2, ARENA * 2),
+      new THREE.MeshStandardMaterial({ color: 0x3a3a44 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    const grid = new THREE.GridHelper(ARENA * 2, 30, 0x555566, 0x444455);
+    scene.add(grid);
+
+    const obstacles = [];   // 충돌(통과 못 함) + 시야 가림에 쓰는 엄폐물 정보
+    const colliders = [];   // 체력바 시야 가림 판정에 쓰는 메쉬들 (벽+엄폐물)
+
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x556070 });
+    function makeWall(w, d, x, z) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 6, d), wallMat);
+      wall.position.set(x, 3, z);
+      wall.castShadow = true; wall.receiveShadow = true;
+      scene.add(wall);
+      colliders.push(wall);
+    }
+    makeWall(ARENA * 2, 1, 0, -ARENA);
+    makeWall(ARENA * 2, 1, 0,  ARENA);
+    makeWall(1, ARENA * 2, -ARENA, 0);
+    makeWall(1, ARENA * 2,  ARENA, 0);
+
+    // 상자/기둥 엄폐물 만들기 (충돌 정보도 같이 저장)
+    function addBox(w, h, d, x, z, color) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color }));
+      mesh.position.set(x, h / 2, z);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      scene.add(mesh);
+      obstacles.push({ minX: x - w/2, maxX: x + w/2, minZ: z - d/2, maxZ: z + d/2 });
+      colliders.push(mesh);
+    }
+    // 빨간 드럼통 엄폐물
+    function addBarrel(x, z) {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.6, 14),
+        new THREE.MeshStandardMaterial({ color: 0xb33b2e, metalness: 0.3, roughness: 0.6 }));
+      mesh.position.set(x, 0.8, z);
+      mesh.castShadow = true; scene.add(mesh);
+      obstacles.push({ minX: x - 0.6, maxX: x + 0.6, minZ: z - 0.6, maxZ: z + 0.6 });
+      colliders.push(mesh);
+    }
+    // 큰 나무 상자들
+    addBox(4, 4, 4, -15, -10, 0x8a6d3b);
+    addBox(4, 4, 4, 12, 8, 0x8a6d3b);
+    addBox(3, 3, 3, -8, 15, 0x7a5d2b);
+    addBox(5, 3, 2, 18, -14, 0x8a6d3b);
+    addBox(3, 3, 5, -22, -2, 0x7a5d2b);
+    // 콘크리트 기둥(높음)
+    addBox(2, 6, 2, -20, 12, 0x6a6a78);
+    addBox(2, 6, 2, 22, 18, 0x6a6a78);
+    addBox(2, 6, 2, 14, -22, 0x6a6a78);
+    // 중앙 낮은 엄폐물 (앉아서 숨기 좋음)
+    addBox(7, 1.6, 7, 0, 0, 0x5a6a4a);
+    // 드럼통들
+    addBarrel(-6, -4); addBarrel(-4, -6); addBarrel(8, -2);
+    addBarrel(-18, -18); addBarrel(16, 11); addBarrel(6, 19);
+
+    // ---------- 플레이어(1인칭 조종) ----------
+    const controls = new PointerLockControls(camera, renderer.domElement);
+    scene.add(controls.getObject());
+    controls.getObject().position.set(0, 1.7, 25);
+
+    // ---------- 설정 (감도·시야각·소리 등, localStorage에 저장됨) ----------
+    const DEFAULT_SETTINGS = { sens: 0.15, adsSens: 0.6, fov: 70, shake: 1, sound: true, crosshair: '#ffffff' };
+    let settings = Object.assign({}, DEFAULT_SETTINGS);
+    try {
+      const saved = JSON.parse(localStorage.getItem('zombieFpsSettings'));
+      if (saved) settings = Object.assign(settings, saved);
+    } catch (e) {}
+
+    function saveSettings() {
+      try { localStorage.setItem('zombieFpsSettings', JSON.stringify(settings)); } catch (e) {}
+    }
+
+    // 설정값을 게임에 실제로 적용
+    function applySettings() {
+      controls.pointerSpeed = settings.sens * 0.61;  // 발로란트 감도 → 게임 감도(800DPI 기준 추정)
+      camera.fov = settings.fov;
+      camera.updateProjectionMatrix();
+      document.documentElement.style.setProperty('--ch-color', settings.crosshair);
+    }
+    applySettings();
+
+    // 설정 화면 열고 닫기 + 슬라이더 연결
+    const settingsScreen = document.getElementById('settingsScreen');
+    function openSettings() {
+      document.getElementById('startScreen').classList.add('hidden');
+      settingsScreen.classList.remove('hidden');
+    }
+    function closeSettings() {
+      settingsScreen.classList.add('hidden');
+      saveSettings();
+      if (!controls.isLocked && !gameOver && !inShop && !inWeaponShop) {
+        // 설정을 시작화면에서 열었으면 시작화면, 게임 중(일시정지)에서 열었으면 일시정지 메뉴로
+        if (started) document.getElementById('pauseScreen').classList.remove('hidden');
+        else document.getElementById('startScreen').classList.remove('hidden');
+      }
+    }
+    document.getElementById('openSettingsBtn').onclick = openSettings;
+    document.getElementById('settingsBackBtn').onclick = closeSettings;
+
+    // 입력칸 하나를 설정값과 연결해주는 도우미
+    function bindSetting(id, valId, key, fmt, isNum = true) {
+      const el = document.getElementById(id);
+      const lbl = valId ? document.getElementById(valId) : null;
+      if (el.type === 'checkbox') el.checked = settings[key];
+      else el.value = settings[key];
+      if (lbl) lbl.textContent = fmt(settings[key]);
+      el.addEventListener('input', () => {
+        let v;
+        if (el.type === 'checkbox') v = el.checked;
+        else if (el.type === 'color') v = el.value;
+        else v = isNum ? parseFloat(el.value) : el.value;
+        settings[key] = v;
+        if (lbl) lbl.textContent = fmt(v);
+        applySettings();
+        saveSettings();
+      });
+    }
+    bindSetting('setSens', 'sensVal', 'sens', v => v.toFixed(2));
+    bindSetting('setAdsSens', 'adsSensVal', 'adsSens', v => Math.round(v * 100) + '%');
+    bindSetting('setFov', 'fovVal', 'fov', v => Math.round(v));
+    bindSetting('setShake', 'shakeVal', 'shake', v => Math.round(v * 100) + '%');
+    bindSetting('setSound', null, 'sound', v => v);
+    bindSetting('setColor', null, 'crosshair', v => v, false);
+
+    const startScreen = document.getElementById('startScreen');
+    const overScreen  = document.getElementById('overScreen');
+    const pauseScreen = document.getElementById('pauseScreen');
+    const scopeEl = document.getElementById('scope');       // 저격 스코프 화면
+    const chEl = document.getElementById('crosshair');      // 평소 조준점
+
+    document.getElementById('startBtn').onclick = () => {
+      // PC게임처럼 전체화면으로 (지원 안 하면 그냥 진행)
+      if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+      controls.lock();
+    };
+    document.getElementById('restartBtn').onclick = () => location.reload();
+    document.getElementById('resumeBtn').onclick = () => controls.lock();
+    document.getElementById('pauseSettingsBtn').onclick = () => {
+      pauseScreen.classList.add('hidden'); settingsScreen.classList.remove('hidden');
+    };
+
+    controls.addEventListener('lock', () => {
+      startScreen.classList.add('hidden');
+      pauseScreen.classList.add('hidden');
+      // 일시정지/무기상점으로 멈췄던 준비시간 보정(멈춘 만큼 뒤로 밀기)
+      if (graceFrozenAt) { graceUntil += clock.getElapsedTime() - graceFrozenAt; graceFrozenAt = 0; }
+      if (!started) { started = true; startWave(); }   // 첫 시작: 버튼 눌렀을 때 1웨이브 시작
+    });
+    controls.addEventListener('unlock', () => {
+      if (gameOver || inShop || inWeaponShop) return;   // 이 경우들은 각자 화면이 뜸
+      if (started) {                                     // ESC로 풀림 → 일시정지 메뉴
+        document.getElementById('pauseWave').textContent = wave;
+        document.getElementById('pauseCoins').textContent = coins;
+        pauseScreen.classList.remove('hidden');
+        if (clock.getElapsedTime() < graceUntil) graceFrozenAt = clock.getElapsedTime();
+      } else {
+        startScreen.classList.remove('hidden');
+      }
+    });
+
+    // ---------- 키보드 입력 ----------
+    const keys = {};
+    addEventListener('keydown', (e) => {
+      keys[e.code] = true;
+      if (e.code === 'KeyB') {   // B: 무기 상점 (웨이브 준비시간에만 열림)
+        if (inWeaponShop) closeWeaponShop();
+        else if (controls.isLocked && !gameOver) {
+          if (clock.getElapsedTime() < graceUntil) openWeaponShop();
+          else showToast('🔒 전투 중엔 무기 상점을 못 열어요<br><span style="font-size:18px">웨이브 시작 직전 준비시간(B)에만 가능</span>', 1.4);
+        }
+        return;
+      }
+      if (e.code === 'Escape' && inWeaponShop) { closeWeaponShop(); return; }
+      if (e.code === 'KeyR') reload();
+      if (e.code === 'KeyG') throwItem('frag');     // 수류탄
+      if (e.code === 'KeyF') {       // F: 칼을 들고 있으면 검사(Inspect), 아니면 화염병
+        if (equipped === 'knife' && !gameOver && controls.isLocked) {
+          const ka = knifeAnim;
+          if (ka.state === 'Knife_Idle' || ka.state === 'Knife_Run') { ka.state = 'Knife_Inspect'; ka.t = 0; }
+        } else throwItem('molotov');
+      }
+      if (e.code === 'KeyC') throwItem('ice');      // 얼음 수류탄
+      if (e.code === 'KeyV') throwItem('flash');    // 섬광탄
+      if (e.code === 'KeyX') activateUlt();         // ⚡ 궁극기(오버드라이브)
+      // 숫자키로 무기 바꾸기 (가지고 있는 총만)
+      if (e.code === 'Digit1') trySwitch('pistol');
+      if (e.code === 'Digit2') trySwitch('rifle');
+      if (e.code === 'Digit3') trySwitch('smg');
+      if (e.code === 'Digit4') trySwitch('shotgun');
+      if (e.code === 'Digit5') trySwitch('sniper');
+      if (e.code === 'Digit6') trySwitch('minigun');
+      if (e.code === 'Digit7') trySwitch('rocket');
+      if (e.code === 'KeyQ') {   // Q: 칼 들기 / 다시 누르면 원래 총으로
+        if (!gameOver && controls.isLocked) {
+          if (equipped === 'knife') { if (WEAPONS[prevGun] && WEAPONS[prevGun].owned) equip(prevGun); }
+          else { prevGun = equipped; equip('knife'); }
+        }
+      }
+      if (e.code === 'KeyT') {   // T: 칼 검사(Inspect) — 칼을 들고 있을 때만
+        if (!gameOver && controls.isLocked && equipped === 'knife') {
+          const ka = knifeAnim;
+          if (ka.state === 'Knife_Idle' || ka.state === 'Knife_Run') { ka.state = 'Knife_Inspect'; ka.t = 0; }
+        }
+      }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (onGround && controls.isLocked && !gameOver) {
+          velocityY = 8;
+          onGround = false;
+          beep(440, 0.08, 'sine');
+        }
+      }
+    });
+    addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+    function trySwitch(key) {
+      if (gameOver || !controls.isLocked) return;
+      if (WEAPONS[key] && WEAPONS[key].owned && key !== equipped) equip(key);
+    }
+
+    // ---------- 무기 종류 (상점에서 사고 바꿈) ----------
+    // dmg=한 발 기본 데미지, fireDelay=발사 간격(초, 작을수록 빠름), auto=꾹누르면 연사,
+    // mag=탄창 크기, reload=재장전 시간(초), pellets=한 번에 나가는 탄알 수(샷건은 여러발),
+    // spread=퍼짐(클수록 부정확), recoil=반동 세기, scale=총 크기, color=금속 색
+    // falloffStart/End/Min: 거리감쇠(가까우면 100%, End 이상이면 Min배). 무기 역할 분담용.
+    const WEAPONS = {
+      pistol:  { name:'권총',     dmg:2, fireDelay:0.18, auto:false, mag:14, reload:1.0, pellets:1, spread:0.004, recoil:1.0, scale:0.9,  color:0x33373d, owned:true,  price:0,    adsZoom:1.2 },
+      rifle:   { name:'소총',     dmg:3, fireDelay:0.11, auto:true,  mag:30, reload:1.4, pellets:1, spread:0.012, recoil:0.85,scale:1.12, color:0x2b3340, owned:false, price:250,  adsZoom:1.4 },
+      smg:     { name:'기관단총', dmg:2, fireDelay:0.065,auto:true,  mag:40, reload:1.2, pellets:1, spread:0.026, recoil:0.6, scale:0.92, color:0x40322a, owned:false, price:360,  adsZoom:1.3, falloffStart:14, falloffEnd:32, falloffMin:0.4 },
+      shotgun: { name:'샷건',     dmg:2, fireDelay:0.78, auto:false, mag:8,  reload:1.8, pellets:9, spread:0.075, recoil:2.2, scale:1.06, color:0x3a2f22, owned:false, price:520,  adsZoom:1.15, falloffStart:7, falloffEnd:20, falloffMin:0.18 },
+      sniper:  { name:'저격총',   dmg:28,fireDelay:1.05, auto:false, mag:5,  reload:2.0, pellets:1, spread:0.0008,recoil:3.0, scale:1.2,  color:0x2a2f25, owned:false, price:760,  pierce:3, adsZoom:4.0 },
+      minigun: { name:'미니건',   dmg:3, fireDelay:0.04, auto:true,  mag:120,reload:4.0, pellets:1, spread:0.034, recoil:0.5, scale:1.15, color:0x303030, owned:false, price:1100, moveMul:0.7, adsZoom:1.25 },
+      rocket:  { name:'로켓런처', dmg:4, fireDelay:1.1,  auto:false, mag:1,  reload:1.6, pellets:1, spread:0.002, recoil:3.5, scale:1.1,  color:0x37322a, owned:false, price:1400, explosive:true, usesReserve:true, adsZoom:1.5 },
+      // 🔪 칼: 탄약 없이 근접 공격. 들고 있으면 이동속도 1.45배 (moveMul) — 도망/이동용
+      knife:   { name:'칼',       dmg:14,fireDelay:0.42, auto:false, mag:1,  reload:0,   pellets:1, spread:0,     recoil:0.5, scale:1.0,  color:0x99a6b3, owned:true,  price:0,    melee:true, moveMul:1.45, adsZoom:1 },
+    };
+    const WEAPON_ORDER = ['pistol', 'rifle', 'smg', 'shotgun', 'sniper', 'minigun', 'rocket'];
+    const WEAPON_ROLE = {
+      pistol:  '기본 무기 · 안정적 · 탄약 부담 적음',
+      rifle:   '가장 무난한 메인 무기',
+      smg:     '초고속 연사 · 근~중거리 (멀면 약함)',
+      shotgun: '근접 최강 · 원거리는 매우 약함',
+      sniper:  '관통/헤드샷 특화 · 장전·연사 느림',
+      minigun: '압도적 화력 · 이동 느려지고 장전 김',
+      rocket:  '광역 폭발 · 예비 탄약 제한(보급/구매)',
+    };
+    let equipped = 'pistol';
+    let prevGun = 'pistol';   // Q로 칼을 들기 직전에 쓰던 총 (다시 Q 누르면 이 총으로 복귀)
+
+    // ===== 무기 숙련도 (많이 쓰면 그 무기만 조금씩 성장 · localStorage 영구 저장) =====
+    // metric: 무엇을 세는지 / per: 1레벨당 필요 수 / max: 최대 레벨
+    const MASTERY = {
+      pistol:  { metric:'kills',    per:50,  max:5, label:'장전 속도' },
+      rifle:   { metric:'kills',    per:100, max:5, label:'반동 감소' },
+      smg:     { metric:'kills',    per:150, max:5, label:'탄퍼짐 감소' },
+      shotgun: { metric:'kills',    per:80,  max:5, label:'근거리 데미지' },
+      sniper:  { metric:'hs',       per:30,  max:5, label:'헤드샷 배율' },
+      minigun: { metric:'kills',    per:200, max:5, label:'장전 속도' },
+      rocket:  { metric:'expKills', per:20,  max:5, label:'폭발 범위' },
+    };
+    for (const k in WEAPONS) WEAPONS[k].stat = { kills:0, hs:0, bossDmg:0, shots:0, expKills:0 };
+    try {
+      const ms = JSON.parse(localStorage.getItem('zombieFpsMastery')) || {};
+      for (const k in WEAPONS) if (ms[k]) Object.assign(WEAPONS[k].stat, ms[k]);
+    } catch (e) {}
+    function saveMastery() {
+      const o = {}; for (const k in WEAPONS) o[k] = WEAPONS[k].stat;
+      try { localStorage.setItem('zombieFpsMastery', JSON.stringify(o)); } catch (e) {}
+    }
+    function masteryLevel(key) {
+      const m = MASTERY[key]; if (!m) return 0;
+      return Math.min(m.max, Math.floor((WEAPONS[key].stat[m.metric] || 0) / m.per));
+    }
+
+    // 최고 기록(영구) + 이번 판 통계(게임오버 표시용)
+    let records = { bestWave: 1, bestScore: 0 };
+    try { records = Object.assign(records, JSON.parse(localStorage.getItem('zombieFpsRecords')) || {}); } catch (e) {}
+    let runHeadshots = 0, runBestCombo = 0, runBossKills = 0, runCoinsEarned = 0, runMissionsDone = 0;
+    const runWeaponShots = {};
+
+    // 각 총의 '조준기 중심(AimPart)' 로컬 좌표 — ADS 때 이 점을 화면 정중앙에 정렬한다
+    const AIM_OFFSETS = {
+      pistol:  { x: 0, y: 0.12,  z: -0.05 },
+      rifle:   { x: 0, y: 0.12,  z: -0.10 },
+      smg:     { x: 0, y: 0.135, z: -0.10 },
+      shotgun: { x: 0, y: 0.12,  z: -0.30 },
+      sniper:  { x: 0, y: 0.16,  z: -0.10 },
+      minigun: { x: 0, y: 0.14,  z: -0.20 },
+      rocket:  { x: 0, y: 0.20,  z: -0.20 },
+    };
+
+    // ---------- 총 모델 (무기마다 모양이 다름!) ----------
+    // 카메라에 붙는 컨테이너 — 반동 애니메이션은 이걸 움직임
+    const gunHolder = new THREE.Group();
+    gunHolder.position.set(0.32, -0.3, -0.7);
+    camera.add(gunHolder);
+    scene.add(camera);
+
+    // 발사할 때 주변을 잠깐 밝히는 총구 불빛 (동적 조명)
+    const muzzleLight = new THREE.PointLight(0xffd070, 0, 14, 2);
+    muzzleLight.position.set(0.3, -0.15, -1.4);
+    muzzleLight.layers.enable(1);   // 총(레이어1)도 비춤
+    camera.add(muzzleLight);
+
+    // 총 전용 카메라: 배경(월드)이 줌돼도 총은 항상 같은 크기로 보이게 (진짜 게임 정조준 느낌)
+    const gunCam = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.01, 12);
+    gunCam.layers.set(1);           // 레이어1(총)만 그림
+    camera.add(gunCam);
+
+    const GUN_REST_Z = -0.7;
+    let muzzleOffAt = 0;
+    let muzzleFlash;              // 지금 든 총의 총구 불꽃 (무기 바꾸면 교체됨)
+    const gunModels = {};         // 무기별 3D 모델 보관소
+
+    // 부품을 쉽게 만드는 도우미들
+    function box(g, w, h, d, mat, x, y, z, rx = 0) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m;
+    }
+    function cyl(g, r1, r2, len, mat, x, y, z) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, 16), mat);
+      m.position.set(x, y, z); m.rotation.x = Math.PI / 2; g.add(m); return m;
+    }
+    function addFlash(g, size, x, y, z) {            // 총구 불꽃
+      const f = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffdd55 }));
+      f.position.set(x, y, z); f.visible = false; g.add(f);
+      g.userData.flash = f;
+    }
+
+    // 🔫 권총 — 작고 짧음, 개머리판 없음
+    function buildPistol() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x2c2f34, metalness: 0.7, roughness: 0.4 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x121316, metalness: 0.4, roughness: 0.7 });
+      box(g, 0.1, 0.13, 0.4, metal, 0, 0.03, -0.05);      // 슬라이드(몸통)
+      box(g, 0.08, 0.09, 0.12, metal, 0, 0.0, -0.26);     // 총구 쪽
+      box(g, 0.1, 0.22, 0.12, dark, 0, -0.16, 0.08, -0.2);// 손잡이
+      box(g, 0.02, 0.06, 0.08, dark, 0, -0.08, 0.02);     // 방아쇠 보호대
+      const pmag = box(g, 0.07, 0.2, 0.1, dark, 0, -0.26, 0.085, -0.2); // 탄창(손잡이 속)
+      g.userData.mag = pmag; g.userData.magBaseY = pmag.position.y;
+      addFlash(g, 0.07, 0, 0.03, -0.34);
+      return g;
+    }
+
+    // 🔫 소총 — 길쭉, 긴 총열 + 소염기 + 개머리판 (군용 녹색)
+    function buildRifle() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x39463a, metalness: 0.6, roughness: 0.5 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x121316, metalness: 0.4, roughness: 0.7 });
+      box(g, 0.11, 0.17, 0.6, metal, 0, 0, 0);            // 몸통
+      box(g, 0.1, 0.035, 0.45, dark, 0, 0.105, -0.05);    // 윗레일
+      box(g, 0.075, 0.085, 0.34, dark, 0, 0.02, -0.42);   // 핸드가드
+      cyl(g, 0.026, 0.026, 0.55, dark, 0, 0.03, -0.62);   // 긴 총열
+      cyl(g, 0.04, 0.034, 0.09, dark, 0, 0.03, -0.9);     // 소염기
+      box(g, 0.09, 0.26, 0.13, dark, 0, -0.2, 0.22, -0.35);// 손잡이
+      box(g, 0.025, 0.07, 0.1, dark, 0, -0.11, 0.07);     // 방아쇠 보호대
+      const rmag = box(g, 0.08, 0.26, 0.12, dark, 0, -0.18, -0.02, 0.18); // 탄창
+      g.userData.mag = rmag; g.userData.magBaseY = rmag.position.y;
+      box(g, 0.02, 0.035, 0.09, metal, 0.065, 0.07, 0.05);// 장전손잡이
+      box(g, 0.09, 0.14, 0.26, metal, 0, -0.02, 0.46);    // 개머리판
+      addFlash(g, 0.1, 0, 0.03, -0.97);
+      return g;
+    }
+
+    // 🔫 기관단총 — 짧고 각짐, 긴 탄창 + 얇은 접이식 개머리판
+    function buildSMG() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x26282c, metalness: 0.7, roughness: 0.45 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x0e0f11, metalness: 0.4, roughness: 0.7 });
+      box(g, 0.12, 0.18, 0.4, metal, 0, 0, -0.02);        // 짧고 각진 몸통
+      cyl(g, 0.022, 0.022, 0.22, dark, 0, 0.03, -0.34);   // 짧은 총열
+      box(g, 0.09, 0.05, 0.2, dark, 0, 0.1, -0.05);       // 윗부분
+      box(g, 0.09, 0.24, 0.12, dark, 0, -0.18, 0.06, -0.15);// 손잡이
+      const smag = box(g, 0.07, 0.34, 0.1, dark, 0, -0.22, -0.12, 0.1);// 긴 탄창(아래로 길게)
+      g.userData.mag = smag; g.userData.magBaseY = smag.position.y;
+      box(g, 0.03, 0.03, 0.28, metal, 0, 0.02, 0.32);     // 접이식 개머리판 봉
+      box(g, 0.09, 0.1, 0.04, metal, 0, 0.02, 0.46);      // 개머리판 끝판
+      addFlash(g, 0.08, 0, 0.03, -0.48);
+      return g;
+    }
+
+    // 🔫 샷건 — 굵은 총열 + 아래 탄창 튜브 + 펌프, 나무 개머리판
+    function buildShotgun() {
+      const g = new THREE.Group();
+      const wood  = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, metalness: 0.1, roughness: 0.85 });
+      const metal = new THREE.MeshStandardMaterial({ color: 0x1c1e22, metalness: 0.7, roughness: 0.5 });
+      box(g, 0.12, 0.15, 0.5, metal, 0, 0, 0.02);         // 몸통
+      cyl(g, 0.045, 0.045, 0.62, metal, 0, 0.04, -0.66);  // 굵은 총열
+      cyl(g, 0.03, 0.03, 0.5, metal, 0, -0.04, -0.6);     // 아래 탄창 튜브
+      box(g, 0.1, 0.09, 0.16, wood, 0, -0.04, -0.42);     // 펌프 손잡이(나무)
+      box(g, 0.09, 0.22, 0.12, wood, 0, -0.16, 0.12, -0.2);// 손잡이(나무)
+      box(g, 0.1, 0.15, 0.3, wood, 0, -0.02, 0.42);       // 나무 개머리판
+      addFlash(g, 0.13, 0, 0.04, -1.0);
+      return g;
+    }
+
+    // 🔫 저격총 — 아주 길쭉 + 큰 조준경(스코프) + 양각대
+    function buildSniper() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f25, metalness: 0.6, roughness: 0.5 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x0e0f11, metalness: 0.4, roughness: 0.7 });
+      const glass = new THREE.MeshStandardMaterial({ color: 0x224488, metalness: 0.9, roughness: 0.1, emissive: 0x113366 });
+      box(g, 0.1, 0.16, 0.7, metal, 0, 0, 0.05);          // 긴 몸통
+      cyl(g, 0.03, 0.03, 0.8, dark, 0, 0.03, -0.7);       // 아주 긴 총열
+      cyl(g, 0.05, 0.045, 0.1, dark, 0, 0.03, -1.12);     // 총구 브레이크
+      // 큰 조준경
+      cyl(g, 0.06, 0.06, 0.34, dark, 0, 0.16, -0.1);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.055, 16), glass);
+      lens.position.set(0, 0.16, 0.08); g.add(lens);
+      box(g, 0.09, 0.28, 0.13, dark, 0, -0.2, 0.26, -0.35);// 손잡이
+      const snmag = box(g, 0.07, 0.18, 0.1, dark, 0, -0.16, 0.0, 0.1); // 탄창
+      g.userData.mag = snmag; g.userData.magBaseY = snmag.position.y;
+      box(g, 0.1, 0.16, 0.32, metal, 0, -0.02, 0.5);      // 개머리판
+      // 양각대(앞다리)
+      box(g, 0.02, 0.16, 0.02, dark, -0.06, -0.12, -0.7);
+      box(g, 0.02, 0.16, 0.02, dark, 0.06, -0.12, -0.7);
+      addFlash(g, 0.11, 0, 0.03, -1.2);
+      return g;
+    }
+
+    // 🔫 미니건 — 굵은 몸통 + 회전하는 6연장 총열 다발 + 큰 탄통
+    function buildMinigun() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x303030, metalness: 0.8, roughness: 0.35 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.5, roughness: 0.6 });
+      box(g, 0.2, 0.2, 0.4, metal, 0, 0, 0.1);            // 굵은 몸통
+      // 회전 총열 다발 (6개)
+      const barrels = new THREE.Group();
+      for (let k = 0; k < 6; k++) {
+        const a = k / 6 * Math.PI * 2;
+        cyl(barrels, 0.022, 0.022, 0.7, dark, Math.cos(a) * 0.06, Math.sin(a) * 0.06, -0.5);
+      }
+      g.add(barrels);
+      g.userData.barrels = barrels;                       // 쏠 때 빙글 돌림
+      cyl(g, 0.1, 0.1, 0.16, metal, 0, 0, -0.8);          // 총열 앞 고정링
+      box(g, 0.14, 0.3, 0.16, dark, 0, -0.22, 0.18, -0.2);// 손잡이
+      const mmag = box(g, 0.16, 0.22, 0.16, dark, 0.16, -0.05, 0.14); // 옆 탄통
+      g.userData.mag = mmag; g.userData.magBaseY = mmag.position.y;
+      addFlash(g, 0.12, 0, 0, -0.86);
+      return g;
+    }
+
+    // 🔫 로켓런처 — 굵은 원통 발사관 + 조준경 + 어깨받침
+    function buildRocket() {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x37322a, metalness: 0.5, roughness: 0.6 });
+      const dark  = new THREE.MeshStandardMaterial({ color: 0x14130f, metalness: 0.4, roughness: 0.7 });
+      const warhead = new THREE.MeshStandardMaterial({ color: 0xb33b2e, metalness: 0.3, roughness: 0.6 });
+      cyl(g, 0.12, 0.12, 1.0, metal, 0, 0, -0.2);         // 굵은 발사관
+      cyl(g, 0.15, 0.12, 0.16, dark, 0, 0, 0.32);         // 뒤쪽 배기 나팔
+      // 장전된 로켓탄 머리(앞에 살짝 보임)
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 12), warhead);
+      head.rotation.x = -Math.PI / 2; head.position.set(0, 0, -0.78); g.add(head);
+      box(g, 0.08, 0.05, 0.3, dark, 0, 0.14, -0.15);      // 윗 조준대
+      box(g, 0.05, 0.03, 0.12, dark, 0, 0.16, -0.15);     // 윗 조준 레일
+      box(g, 0.09, 0.24, 0.12, dark, 0, -0.22, 0.0, -0.3);// 손잡이
+      box(g, 0.12, 0.04, 0.18, dark, 0, -0.13, 0.2);      // 어깨받침
+      addFlash(g, 0.14, 0, 0, -0.74);
+      return g;
+    }
+
+    // 글러브 낀 1인칭 손/팔 한 짝 만들기 (뷰모델용) — 주먹 + 손목 + 전완(소매)
+    // sign: +1=오른손, -1=왼손. 손바닥 안쪽이 칼을 향하도록 살짝 안쪽으로 기울임.
+    function buildGloveArm(sign) {
+      const a = new THREE.Group();
+      const glove = new THREE.MeshStandardMaterial({ color: 0x3a3f47, metalness: 0.15, roughness: 0.85 }); // 전술 글러브(밝은 회색이라 안 검음)
+      const cuff  = new THREE.MeshStandardMaterial({ color: 0x23262b, metalness: 0.2,  roughness: 0.9 });  // 소매 끝동
+      const knuck = new THREE.MeshStandardMaterial({ color: 0x2c3036, metalness: 0.3,  roughness: 0.7 });  // 너클 보강
+      box(a, 0.105, 0.10, 0.13, glove, 0, 0, 0);                 // 주먹(쥔 손)
+      box(a, 0.108, 0.035, 0.10, knuck, 0, 0.052, -0.01);        // 손등 너클
+      box(a, 0.03, 0.05, 0.06, glove, sign * 0.06, 0.02, -0.05); // 엄지(안쪽)
+      box(a, 0.10, 0.095, 0.12, glove, sign * 0.01, -0.01, 0.13);// 손목
+      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.075, 0.34, 14), glove); // 전완
+      fore.rotation.x = Math.PI / 2; fore.position.set(sign * 0.02, -0.02, 0.32); a.add(fore);
+      box(a, 0.13, 0.135, 0.07, cuff, sign * 0.02, -0.02, 0.20); // 소매 끝동
+      return a;
+    }
+
+    // 🔪 칼 — 현실적 군용 전술 컴뱃 나이프 + 1인칭 양손(글러브)
+    function buildKnife() {
+      // 현실적인 군용 전술 컴뱃 나이프 (-z가 칼끝 방향, +z가 손잡이 뒤쪽)
+      const g = new THREE.Group();
+      // metalness를 낮춰야 환경맵 없이도 조명을 받아 검게 안 보임(금속은 env map 없으면 까맣게 됨)
+      const grip  = new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.15, roughness: 0.85 }); // 폴리머 그립(살짝 밝게)
+      const bolster = new THREE.MeshStandardMaterial({ color: 0x4a4f56, metalness: 0.35, roughness: 0.5 }); // 가드/포멜 건메탈
+      const blade = new THREE.MeshStandardMaterial({ color: 0x7d8794, metalness: 0.25, roughness: 0.45 });  // 칼날(밝은 강철)
+      const edge  = new THREE.MeshStandardMaterial({ color: 0xd2d9e0, metalness: 0.3, roughness: 0.3 });    // 갈린 날(밝은 베벨)
+      const groove = new THREE.MeshStandardMaterial({ color: 0x3a3e44, metalness: 0.3, roughness: 0.5 });   // 풀러(혈조) 음각
+
+      // ── 손잡이(그립): 약간 가늘어지는 본체 + 미끄럼 방지 홈 ──
+      box(g, 0.05, 0.085, 0.26, grip, 0, -0.05, 0.10);
+      for (let i = 0; i < 4; i++)                                   // 바닥 그립 홈(손가락 자리)
+        box(g, 0.054, 0.018, 0.024, grip, 0, -0.097, 0.01 + i * 0.062);
+      // 포멜(손잡이 끝) + 유리 깨는 뒤쪽 팁
+      box(g, 0.056, 0.072, 0.045, bolster, 0, -0.05, 0.245);
+      const glassBreaker = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.05, 6), bolster);
+      glassBreaker.rotation.x = Math.PI / 2; glassBreaker.position.set(0, -0.05, 0.285); g.add(glassBreaker);
+
+      // ── 가드(크로스가드): 손과 칼날 사이 ──
+      box(g, 0.07, 0.115, 0.05, bolster, 0, -0.01, -0.05);
+
+      // ── 칼날 본체: 가늘고(x) 곧은 드롭포인트, 칼끝으로 갈수록 등이 내려옴 ──
+      box(g, 0.026, 0.125, 0.58, blade, 0, 0.015, -0.41);
+      // 드롭포인트 팁(납작하게 눌러 칼끝 느낌)
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 4), blade);
+      tip.rotation.set(-Math.PI / 2, Math.PI / 4, 0); tip.scale.set(0.34, 1, 1);
+      tip.position.set(0, 0.005, -0.79); g.add(tip);
+
+      // 갈린 날(아래쪽 밝은 베벨) — 살짝 튀어나오게
+      box(g, 0.03, 0.03, 0.6, edge, 0, -0.052, -0.4);
+      // 풀러(혈조) — 칼날 옆면 가운데 음각 라인
+      box(g, 0.028, 0.02, 0.4, groove, 0, 0.03, -0.36);
+
+      // ── 등날 세레이션(톱니): 가드 쪽 등 위에 몇 개 ──
+      for (let i = 0; i < 5; i++) {
+        const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.024, 0.05, 4), blade);
+        tooth.rotation.set(0, Math.PI / 4, 0);
+        tooth.position.set(0, 0.085, -0.16 - i * 0.052); g.add(tooth);
+      }
+
+      // ── 오른손: 손잡이(그립)를 쥠 ──
+      const rHand = buildGloveArm(+1);
+      rHand.position.set(0.0, -0.05, 0.12);     // 그립 위치에 주먹
+      rHand.rotation.set(0.15, 0.0, 0.0);
+      g.add(rHand);
+      // ── 왼손: 아래쪽에 살짝만 보이게 (많이 보이지 않도록 아래로 내리고 작게) ──
+      const lHand = buildGloveArm(-1);
+      lHand.position.set(-0.13, -0.40, 0.10);
+      lHand.rotation.set(0.2, 0.5, 0.3);
+      lHand.scale.setScalar(0.7);
+      g.add(lHand);
+
+      addFlash(g, 0.001, 0, 0, -0.9);   // muzzleFlash 참조가 비지 않도록 더미(안 보임)
+      return g;
+    }
+
+    gunModels.pistol  = buildPistol();
+    gunModels.knife   = buildKnife();
+    gunModels.knife.scale.setScalar(0.42);   // 칼+손 전체를 작게 줄여 화면을 덜 가리게(발로란트풍)
+    gunModels.rifle   = buildRifle();
+    gunModels.smg     = buildSMG();
+    gunModels.shotgun = buildShotgun();
+    gunModels.sniper  = buildSniper();
+    gunModels.minigun = buildMinigun();
+    gunModels.rocket  = buildRocket();
+    for (const key in gunModels) {
+      const m = gunModels[key];
+      m.visible = false;
+      m.traverse(o => { o.layers.set(1); if (o.isMesh) o.castShadow = false; }); // 총은 레이어1
+      gunHolder.add(m);
+    }
+
+    // 각 총에 '기본 아이언 사이트'(앞 가늠쇠 기둥 + 뒤 가늠자 U노치) 부착
+    // 조준(ADS) 시 뒤 노치의 가운데 틈으로 앞 가늠쇠를 보고 그 위에 타겟을 올린다 — 진짜 총 조준
+    const sightMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, metalness: 0.3, roughness: 0.78 });
+    function addIronSights(model, off) {
+      const postGeo = new THREE.BoxGeometry(0.018, 0.05, 0.022);
+      // 뒤 가늠자: 가운데가 트인 U자 노치 (좌·우 기둥 + 아래 받침, 위로 열림)
+      const rl = new THREE.Mesh(postGeo, sightMat);
+      rl.position.set(off.x - 0.032, off.y - 0.006, off.z + 0.06);
+      const rr = new THREE.Mesh(postGeo, sightMat);
+      rr.position.set(off.x + 0.032, off.y - 0.006, off.z + 0.06);
+      const rbase = new THREE.Mesh(new THREE.BoxGeometry(0.086, 0.016, 0.022), sightMat);
+      rbase.position.set(off.x, off.y - 0.028, off.z + 0.06);
+      // 앞 가늠쇠: 가운데 기둥 1개 (뒤 노치 틈 안에 보임, 살짝 더 높음)
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(0.013, 0.055, 0.02), sightMat);
+      fr.position.set(off.x, off.y + 0.004, off.z - 0.22);
+      [rl, rr, rbase, fr].forEach(p => { p.layers.set(1); p.userData.isSight = true; model.add(p); });
+    }
+    for (const key in gunModels) {
+      if (AIM_OFFSETS[key]) addIronSights(gunModels[key], AIM_OFFSETS[key]);
+    }
+
+    // ===== 상점용 총 썸네일: 실제 3D 모델을 작은 이미지로 구워서 카드에 사용 =====
+    (function generateWeaponThumbs() {
+     try {
+      const TW = 240, TH = 140;
+      const tr = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      tr.setSize(TW, TH); tr.setPixelRatio(2);
+      tr.outputColorSpace = THREE.SRGBColorSpace;
+      tr.toneMapping = THREE.ACESFilmicToneMapping; tr.toneMappingExposure = 1.15;
+      const ts = new THREE.Scene();
+      const d1 = new THREE.DirectionalLight(0xffffff, 2.0); d1.position.set(3, 5, 6); ts.add(d1);
+      const d2 = new THREE.DirectionalLight(0x99bbff, 1.0); d2.position.set(-5, 2, -3); ts.add(d2);
+      ts.add(new THREE.HemisphereLight(0xcfe0ff, 0x202830, 1.1));
+      ts.add(new THREE.AmbientLight(0xffffff, 0.4));
+      const tc = new THREE.PerspectiveCamera(30, TW / TH, 0.01, 100);
+      const fovr = tc.fov * Math.PI / 180;
+      const builders = { pistol: buildPistol, rifle: buildRifle, smg: buildSMG, shotgun: buildShotgun, sniper: buildSniper, minigun: buildMinigun, rocket: buildRocket };
+      const _b = new THREE.Box3(), _s = new THREE.Vector3(), _c = new THREE.Vector3(), _sph = new THREE.Sphere();
+      for (const key in builders) {
+        const m = builders[key]();
+        m.rotation.set(0.16, Math.PI / 2 + 0.42, 0);   // 옆모습에서 살짝 3/4 각도
+        m.traverse(o => { o.layers.set(0); if (o.isMesh) o.castShadow = false; });
+        ts.add(m);
+        m.updateMatrixWorld(true);
+        _b.setFromObject(m); _b.getSize(_s); _b.getCenter(_c);
+        m.position.sub(_c); m.updateMatrixWorld(true);   // 가운데 정렬
+        _b.setFromObject(m); _b.getBoundingSphere(_sph);
+        const dist = _sph.radius / Math.sin(fovr / 2) * 1.12;
+        tc.position.set(0, 0, dist); tc.lookAt(0, 0, 0);
+        tr.render(ts, tc);
+        WEAPONS[key].thumb = tr.domElement.toDataURL('image/png');
+        ts.remove(m);
+        m.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => mm.dispose()); });
+      }
+      tr.dispose();
+     } catch (e) { console.warn('총 썸네일 생성 실패(이모지로 대체):', e); }
+    })();
+
+    // 든 무기에 맞는 총 모델만 보여주기
+    function restyleGun() {
+      for (const key in gunModels) gunModels[key].visible = false;
+      const model = gunModels[equipped];
+      model.visible = true;
+      muzzleFlash = model.userData.flash;
+    }
+
+    // ---------- 소리 ----------
+    let audioCtx;
+    function beep(freq, dur, type = 'square', vol = 0.15) {
+      if (!settings.sound) return;   // 설정에서 효과음 껐으면 소리 안 냄
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = type; o.frequency.value = freq;
+        g.gain.value = vol;
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start();
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+        o.stop(audioCtx.currentTime + dur);
+      } catch (e) {}
+    }
+
+    // ---------- 게임 상태 ----------
+    let health = 100;
+    let kills = 0;
+    let score = 0;
+    let coins = 100;   // 실제 게임용 시작 코인 (초반은 권총으로 버티고, 3~5웨이브부터 무기 구매)
+    let wave = 1;
+    let ammo = 12;
+    let rocketAmmo = 0;            // 로켓런처 예비 탄약(장전 시 1발씩 소모)
+    const ROCKET_AMMO_CAP = 12;    // 예비 로켓 최대 보유
+    let waveCondition = null;      // 이번 웨이브 특수 조건(랜덤)
+    let graceFrozenAt = 0;         // 일시정지/무기상점으로 준비시간을 멈춘 시점
+
+    // 보급상자 / 임시버프 / 특수조건 상태
+    const supplyBoxes = [];
+    let supplyNextAt = 1e9;
+    let tempPower = 0, tempPowerUntil = 0;   // 임시 공격력
+    let tempSpeed = 0, tempSpeedUntil = 0;   // 임시 이동속도
+    const FOG_NEAR = 28, FOG_FAR = 130;      // 기본 안개(안개 조건이 끝나면 복귀)
+    const seenTraits = new Set();            // 특수 좀비 첫 등장 안내용
+    const TRAIT_INFO = {
+      runner:  '🏃 러너 좀비 등장! 빠르게 접근합니다',
+      brute:   '🟣 브루트 좀비 등장! 느리지만 단단하고 강합니다',
+      armored: '🛡️ 아머 좀비 등장! 총알 피해↓ — 폭발이 효과적',
+      spitter: '🟢 스피터 좀비 등장! 멀리서 산성을 뱉습니다',
+    };
+    const WAVE_CONDITIONS = [
+      { key:'fog',     label:'🌫️ 짙은 안개 — 시야가 좁아진다' },
+      { key:'runners', label:'🏃 러너 무리 — 빠른 좀비가 몰려온다' },
+      { key:'rich',    label:'💰 노다지 — 코인 2배, 대신 좀비가 튼튼함' },
+      { key:'lowammo', label:'🔋 보급 부족 — 이번엔 보급이 거의 없다' },
+      { key:'fire',    label:'🔥 화염 좀비 — 죽을 때 불을 남긴다' },
+      { key:'elite',   label:'⚠️ 정예 출현 — 강한 적이 많이 섞인다' },
+    ];
+    // ===== 웨이브 목표(미션) 상태 =====
+    let objective = null;          // { key, label, done } — 이번 웨이브 목표
+    let objSurviveUntil = 0;       // 생존 목표: 이 시각까지 버티면 성공
+    let objSurviveSpawnAt = 0;     // 생존 목표: 다음 추가 스폰 시각
+    const objCrates = [];          // 회수 목표: 보급품 상자들
+    let objCollected = 0;          // 회수한 상자 수
+    const objSwitches = [];        // 스위치 목표: 스위치들
+    let objSwitchOn = 0;           // 켠 스위치 수
+    let generator = null;          // 🔋 발전기(방어 목표) — 한 번 만들면 맵에 남음
+    const objBoxEl  = document.getElementById('objBox');
+    const objTextEl = document.getElementById('objText');
+    const objProgEl = document.getElementById('objProg');
+
+    let AMMO_MAX = 12;
+    let reloading = false;
+    let gameOver = false;
+    let started = false;
+    let graceUntil = 0;
+    let inShop = false;
+    let inWeaponShop = false;   // B키 무기 상점 열려있는지
+
+    // 점프용
+    let velocityY = 0;
+    let onGround = true;
+
+    // 발사/반동용
+    let firing = false;      // 마우스를 누르고 있는 중인지 (연사용)
+    let lastShot = -999;     // 마지막으로 쏜 시간
+    let shake = 0;           // 카메라 흔들림 세기
+    let bloom = 0;           // 조준점 벌어짐(쏘면 커졌다 줄어듦)
+
+    // 총 모션용 (반동·걷기 흔들·장전 모션을 합쳐서 적용)
+    let recoilZ = 0;         // 반동으로 뒤로 밀린 정도
+    let recoilPitch = 0;     // 반동으로 위로 들린 정도
+    let bobTime = 0;         // 걸을 때 흔들림 타이머
+    let idleTime = 0;        // 가만히 있을 때 숨쉬는 타이머
+    let reloadStart = -999;  // 장전 시작 시간
+    let reloadDur = 1;       // 장전에 걸리는 시간
+    let aiming = false;      // 우클릭 정조준(ADS) 중인지
+    let adsAmount = 0;       // 정조준 진행도 0~1 (부드럽게)
+    let swayX = 0, swayY = 0;     // 총이 마우스 따라 출렁(현재값)
+    let swayTX = 0, swayTY = 0;   // 출렁임 목표(마우스 움직임으로 생김)
+    let leanRoll = 0;        // 좌우 이동 시 총 기울임
+    let landDip = 0;         // 착지할 때 카메라 움푹
+    let viewRecoil = 0;      // 발사 시 화면이 위로 살짝 튀는 정도(부드럽게 회복)
+    // ===== 🔪 전술 나이프 모션 상태머신 =====
+    // 각 모션: dur=지속시간(초), hit=데미지 판정 시점(공격류만). 끝나면 자동으로 Idle로 복귀.
+    const KNIFE_ANIM = {
+      Knife_Equip:       { dur: 0.42 },
+      Knife_Attack:      { dur: 0.34, hit: 0.12 },
+      Knife_HeavyAttack: { dur: 0.60, hit: 0.30 },
+      Knife_Inspect:     { dur: 1.8 },
+    };
+    // state: 'Knife_Idle' | 'Knife_Run' | 'Knife_Equip' | 'Knife_Attack' | 'Knife_HeavyAttack' | 'Knife_Inspect'
+    const knifeAnim = { state: 'Knife_Idle', t: 0, dir: 1, heavy: false, hitDone: false };
+
+    // 업그레이드로 강해지는 능력치
+    let maxHealth = 100;
+    let gunPower = 0;        // 모든 총 데미지에 더해짐
+    let moveBoost = 1;
+    let magBonus = 0;        // 모든 총 탄창에 더해짐
+    let reloadMult = 1;      // 재장전 시간 배율(작을수록 빠름)
+    let pierceBonus = 0;     // 관통탄: 모든 총알이 추가로 뚫는 좀비 수
+    let critChance = 0;      // 크리티컬 확률(0~1) — 터지면 데미지 2배
+    const HEADSHOT_MULT = 2.2;  // 헤드샷 데미지 배율
+    let comboCount = 0, comboUntil = 0;                          // 콤보(짧은 시간 연속 처치)
+    let hsStreak = 0, hsStreakUntil = 0, headshotToastUntil = 0; // 헤드샷 연속
+
+    // ⚡ 궁극기(오버드라이브): 좀비를 처치하면 게이지가 차고, 가득 차면 X키로 발동.
+    //   발동 시 광역 충격파로 주변을 쓸어버리고, 6초간 무적+무한탄약+데미지/이동 강화.
+    let ultCharge = 0;            // 0~ULT_MAX 충전량
+    const ULT_MAX = 100;
+    let ultActiveUntil = 0;       // 오버드라이브 지속이 끝나는 시각(초)
+    let ultReadyAnnounced = false;// "준비됨" 토스트 1회만
+    const ultActive = () => clock.getElapsedTime() < ultActiveUntil;
+
+    // 탕탕특공대식 자동 장비 (사면 알아서 싸워줌)
+    let droneCount = 0;          // 전투 드론 수
+    const drones = [];
+    const tracers = [];          // 드론 사격 빛줄기
+    let forcefieldLevel = 0;     // 포스필드 강화 단계
+    let mineLevel = 0;           // 자동 지뢰 강화 단계
+    const mines = [];
+    let mineTimer = 0;
+    let ffLastDmg = 0;
+    let forcefieldMesh = null;
+
+    // 새 투척 무기
+    let iceGrenades = 0;     // 얼음 수류탄(좀비 얼림)
+    let flashbangs = 0;      // 섬광탄(좀비 기절)
+
+    // 던지는 무기 (수류탄 / 화염병)
+    let grenades = 3;
+    let molotovs = 2;
+    const thrownItems = [];  // 날아가는 수류탄/화염병
+    const explosions = [];   // 폭발 시각효과
+    const firePatches = [];  // 바닥 불바다
+
+    const zombies = [];
+    const zombieLookup = new Map();
+
+    function updateHUD() {
+      document.getElementById('wave').textContent = wave;
+      document.getElementById('coins').textContent = coins;
+      document.getElementById('kills').textContent = kills;
+      document.getElementById('score').textContent = score;
+      document.getElementById('left').textContent = zombies.length;
+      if (WEAPONS[equipped].melee) {   // 🔪 칼: 탄약 개념 없음
+        document.getElementById('ammoNow').textContent = '🔪';
+        document.getElementById('ammoMax').textContent = '∞';
+      } else {
+        document.getElementById('ammoNow').textContent = reloading ? '...' : ammo;
+        document.getElementById('ammoMax').textContent = AMMO_MAX;
+      }
+      const mlv = masteryLevel(equipped);
+      document.getElementById('weaponName').textContent = WEAPONS[equipped].name + (mlv > 0 ? `  ★${mlv}` : '');
+      document.getElementById('gren').textContent = grenades;
+      document.getElementById('molo').textContent = molotovs;
+      document.getElementById('ice').textContent = iceGrenades;
+      document.getElementById('flash').textContent = flashbangs;
+      document.getElementById('healthbar').style.width =
+        Math.max(0, health / maxHealth * 100) + '%';
+      // 로켓런처: 예비 탄약 표시 (다른 총은 무한 예비라 표시 없음)
+      document.getElementById('reserve').textContent =
+        WEAPONS[equipped].usesReserve ? ('  예비 ' + rocketAmmo) : '';
+      // ⚡ 궁극기 게이지
+      const uw = document.getElementById('ultWrap');
+      const active = ultActive();
+      document.getElementById('ultFill').style.width =
+        (active ? 100 : Math.min(100, ultCharge / ULT_MAX * 100)) + '%';
+      uw.classList.toggle('active', active);
+      uw.classList.toggle('ready', !active && ultCharge >= ULT_MAX);
+      if (active) document.getElementById('ultLabel').textContent = '🔥 오버드라이브!';
+      else document.getElementById('ultLabel').textContent = '⚡ 궁극기';
+    }
+
+    // ---------- 화면 알림 / 콤보 / 피격 방향 ----------
+    const toastEl = document.getElementById('toast');
+    const comboEl = document.getElementById('combo');
+    const dmgDirEls = { T: document.getElementById('dmgT'), B: document.getElementById('dmgB'),
+                        L: document.getElementById('dmgL'), R: document.getElementById('dmgR') };
+    let toastUntil = 0, comboHideUntil = 0, dmgDirUntil = 0, dmgDirKey = null;
+    const _fwd = new THREE.Vector3();
+
+    function showToast(html, dur = 1.5) {
+      toastEl.innerHTML = html; toastEl.style.opacity = '1';
+      toastUntil = clock.getElapsedTime() + dur;
+    }
+    function showComboText(txt) {
+      comboEl.textContent = txt; comboEl.style.opacity = '1';
+      comboHideUntil = clock.getElapsedTime() + 1.0;
+    }
+    function flashDamageDir(srcX, srcZ) {   // 공격 들어온 방향을 화면 가장자리에 빨갛게
+      const p = controls.getObject().position;
+      camera.getWorldDirection(_fwd);
+      const ang = Math.atan2(srcX - p.x, srcZ - p.z);
+      const camAng = Math.atan2(_fwd.x, _fwd.z);
+      let rel = ang - camAng;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      const a = Math.abs(rel);
+      const key = a < Math.PI / 4 ? 'T' : a > 3 * Math.PI / 4 ? 'B' : (rel > 0 ? 'R' : 'L');
+      for (const k in dmgDirEls) dmgDirEls[k].style.opacity = '0';
+      dmgDirEls[key].style.opacity = '1';
+      dmgDirKey = key; dmgDirUntil = clock.getElapsedTime() + 0.35;
+    }
+    function fadeTimedUI(now) {   // 시간 지난 알림들 끄기 (update에서 매 프레임 호출)
+      if (toastUntil && now > toastUntil) { toastEl.style.opacity = '0'; toastUntil = 0; }
+      if (comboHideUntil && now > comboHideUntil) { comboEl.style.opacity = '0'; comboHideUntil = 0; }
+      if (dmgDirUntil && now > dmgDirUntil) { if (dmgDirKey) dmgDirEls[dmgDirKey].style.opacity = '0'; dmgDirUntil = 0; }
+    }
+
+    // ---------- 좀비 만들기 ----------
+    function spawnZombie(isBoss = false, atPos = null) {
+      const g = new THREE.Group();
+
+      // 웨이브가 오를수록 특수 능력 좀비 등장 (러너=빠름, 브루트=덩치/체력, 아머=방어)
+      let trait = null;
+      if (!isBoss) {
+        const pool = [];
+        if (wave >= 3) pool.push('runner');
+        if (wave >= 4) pool.push('spitter');
+        if (wave >= 5) pool.push('brute');
+        if (wave >= 7) pool.push('armored');
+        let specialChance = Math.min(0.6, 0.1 + wave * 0.04);   // 후반일수록 특수좀비 ↑
+        if (waveCondition && waveCondition.key === 'elite') specialChance = Math.min(0.9, specialChance + 0.4);
+        if (pool.length && Math.random() < specialChance) trait = pool[Math.floor(Math.random() * pool.length)];
+        // 러너 무리 조건: 러너로 강하게 치우침
+        if (waveCondition && waveCondition.key === 'runners' && pool.includes('runner') && Math.random() < 0.6) trait = 'runner';
+        // 특수 좀비 첫 등장 안내
+        if (trait && !seenTraits.has(trait)) { seenTraits.add(trait); showToast(TRAIT_INFO[trait], 2.2); }
+      }
+
+      let bodyCol = isBoss ? 0x8a2a2a : 0x4a7c3a;
+      let headCol = isBoss ? 0xb04040 : 0x6aa84f;
+      if (trait === 'runner')  { bodyCol = 0x9a8a2a; headCol = 0xcaca4a; }  // 누런 (빠름)
+      if (trait === 'brute')   { bodyCol = 0x5a2a6a; headCol = 0x8a3a9a; }  // 보라 (덩치)
+      if (trait === 'armored') { bodyCol = 0x55606e; headCol = 0x73828f; }  // 회색 금속 (방어)
+      if (trait === 'spitter') { bodyCol = 0x7aa820; headCol = 0xbfff3a; }  // 산성 연두 (원거리 침)
+      const metalness = trait === 'armored' ? 0.7 : 0.1, roughness = trait === 'armored' ? 0.4 : 0.9;
+      const bodyMat = new THREE.MeshStandardMaterial({ color: bodyCol, metalness, roughness });
+      const headMat = new THREE.MeshStandardMaterial({ color: headCol, metalness, roughness });
+      const darkMat = new THREE.MeshStandardMaterial({ color: 0x232a1c, roughness: 0.95 });   // 다리(바지)
+
+      // 살짝 앞으로 숙인 좀비 포즈: 몸통 + 어깨 + 머리 + 빛나는 눈 + 늘어뜨린 팔 + 다리
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.0, 0.42), bodyMat);
+      torso.position.set(0, 1.05, 0); torso.rotation.x = 0.12;
+      const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.26, 0.5), bodyMat);
+      shoulder.position.set(0, 1.5, -0.05);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.52), headMat);
+      head.position.set(0, 1.83, 0.07);
+      head.userData.isHead = true;        // 헤드샷 판정용
+      // 빛나는 눈 — MeshBasic이라 피격/빙결 emissive 처리에 안 휩쓸려 항상 빛남, 총알은 통과
+      const eyeMat = new THREE.MeshBasicMaterial({ color: isBoss ? 0xffd23f : 0xff3322 });
+      const eyeGeo = new THREE.BoxGeometry(0.1, 0.08, 0.05);
+      const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.12, 1.87, 0.34);
+      const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.12, 1.87, 0.34);
+      eyeL.raycast = () => {}; eyeR.raycast = () => {};
+      // 앞으로 뻗은 두 팔 (걸을 때 흔들림)
+      const armGeo = new THREE.BoxGeometry(0.17, 0.17, 0.66);
+      const armL = new THREE.Mesh(armGeo, bodyMat); armL.position.set(-0.46, 1.34, -0.26);
+      const armR = new THREE.Mesh(armGeo, bodyMat); armR.position.set(0.46, 1.34, -0.26);
+      // 두 다리 (걸을 때 번갈아 흔들림)
+      const legGeo = new THREE.BoxGeometry(0.22, 0.72, 0.24);
+      const legL = new THREE.Mesh(legGeo, darkMat); legL.position.set(-0.19, 0.4, 0);
+      const legR = new THREE.Mesh(legGeo, darkMat); legR.position.set(0.19, 0.4, 0);
+      g.add(torso); g.add(shoulder); g.add(head); g.add(eyeL); g.add(eyeR);
+      g.add(armL); g.add(armR); g.add(legL); g.add(legR);
+      g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+      if (isBoss) g.scale.setScalar(2.3);
+      else if (trait === 'runner') g.scale.setScalar(0.82);
+      else if (trait === 'brute')  g.scale.setScalar(1.35);
+      else if (trait === 'spitter') g.scale.setScalar(0.95);
+
+      let x, z;
+      if (atPos) {   // 지정 위치(보스 소환 등) — 경기장 안으로 제한
+        x = Math.max(-ARENA + 2, Math.min(ARENA - 2, atPos.x));
+        z = Math.max(-ARENA + 2, Math.min(ARENA - 2, atPos.z));
+      } else {       // 기본: 가장자리에서 등장
+        const m = ARENA - 3;
+        const edge = Math.floor(Math.random() * 4);
+        if (edge === 0) { x = (Math.random()*2-1)*m; z = -m; }
+        else if (edge === 1) { x = (Math.random()*2-1)*m; z =  m; }
+        else if (edge === 2) { x = -m; z = (Math.random()*2-1)*m; }
+        else { x = m; z = (Math.random()*2-1)*m; }
+      }
+      g.position.set(x, 0, z);
+      scene.add(g);
+
+      // 기본 능력치 (웨이브마다 꾸준히 상승)
+      let baseHp = isBoss ? (200 + wave * 35) : (3 + Math.floor(wave * 0.9));
+      let baseSpeed = isBoss ? (Math.min(2.2, 0.7 + wave * 0.035) + 0.15)
+                             : (Math.min(3.2, 1.0 + wave * 0.1) + Math.random() * 0.3);
+      let baseCoin = isBoss ? (120 + wave * 12) : 15;
+      let dmgResist = 0;
+      // 특수 능력 반영
+      if (trait === 'runner')  { baseSpeed *= 1.7; baseHp = Math.ceil(baseHp * 0.6); baseCoin += 8;  }
+      if (trait === 'brute')   { baseHp = Math.ceil(baseHp * 2.6); baseSpeed *= 0.62; baseCoin += 25; }
+      if (trait === 'armored') { dmgResist = 0.5; baseHp = Math.ceil(baseHp * 1.3); baseCoin += 18;   }
+      if (trait === 'spitter') { baseHp = Math.ceil(baseHp * 0.85); baseSpeed *= 0.8; baseCoin += 14;  }
+      if (waveCondition && waveCondition.key === 'rich' && !isBoss) { baseHp = Math.ceil(baseHp * 1.3); baseCoin *= 2; }  // 노다지
+      const zombie = {
+        group: g,
+        isBoss,
+        trait,
+        dmgResist,           // 받는 데미지 감소율(아머 좀비)
+        hp: baseHp,
+        speed: baseSpeed,
+        coin: baseCoin,
+        lastHit: 0
+      };
+      zombie.maxHp = zombie.hp;
+      zombie.armL = armL; zombie.armR = armR;
+      zombie.legL = legL; zombie.legR = legR;
+      if (!isBoss && waveCondition && waveCondition.key === 'fire' && Math.random() < 0.5) zombie.onDeathFire = true;  // 화염 좀비
+      if (isBoss) { zombie.nextAttack = clock.getElapsedTime() + 2.5; zombie.charging = false; }  // 보스 공격 타이머
+      if (trait === 'spitter') zombie.nextSpit = clock.getElapsedTime() + 1.8;   // 스피터 침 타이머
+      zombies.push(zombie);
+      zombieLookup.set(g.id, zombie);
+      g.traverse(o => { o.userData.zombieGroupId = g.id; });
+
+      // 머리 위 체력바 (항상 카메라를 바라보는 스프라이트)
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 20;
+      zombie.hbCtx = canvas.getContext('2d');
+      zombie.hbTex = new THREE.CanvasTexture(canvas);
+      const hbSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: zombie.hbTex, depthTest: false }));
+      hbSprite.position.set(0, isBoss ? 2.5 : 2.3, 0);
+      hbSprite.scale.set(1.2, 0.2, 1);
+      hbSprite.raycast = () => {};   // 총알이 체력바엔 안 맞게
+      g.add(hbSprite);
+      zombie.hbSprite = hbSprite;
+      drawHealthBar(zombie);
+    }
+
+    // 좀비 체력바 그리기 (canvas에 그려서 스프라이트에 입힘)
+    function drawHealthBar(z) {
+      const ctx = z.hbCtx, w = 128, h = 20;
+      const r = Math.max(0, z.hp / z.maxHp);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = z.isBoss ? '#ff5a5a' : (r > 0.5 ? '#5cff6a' : r > 0.25 ? '#ffd23f' : '#ff5a5a');
+      ctx.fillRect(2, 2, (w - 4) * r, h - 4);
+      z.hbTex.needsUpdate = true;
+    }
+
+    // ================= 웨이브 목표(미션) + 발전기 시스템 =================
+
+    // 이번 웨이브의 목표를 정한다 (보스 웨이브=약점파괴, 초반=전멸, 그 외 랜덤)
+    function chooseObjective() {
+      if (wave % 5 === 0) { objective = { key:'bossweak', label:'👹 보스의 약점을 파괴하라!', done:false }; return; }
+      if (wave <= 2)      { objective = { key:'eliminate', label:'🧟 좀비를 전멸시켜라', done:false }; return; }
+      const pool = ['eliminate', 'defend', 'collect', 'switches', 'survive'];
+      const key = pool[Math.floor(Math.random() * pool.length)];
+      const labels = {
+        eliminate: '🧟 좀비를 전멸시켜라',
+        defend:    '🔋 발전기를 방어하라',
+        collect:   '📦 보급품을 회수하라',
+        switches:  '🔌 스위치 3개를 작동하라',
+        survive:   '⏱️ 제한 시간 동안 생존하라',
+      };
+      objective = { key, label: labels[key], done: false };
+    }
+
+    // 🔋 발전기 만들기 (처음 방어 웨이브 때 한 번만 — 이후 맵에 계속 남음)
+    function ensureGenerator() {
+      if (generator) return;
+      const gx = 0, gz = -12;
+      const grp = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 2.2),
+        new THREE.MeshStandardMaterial({ color: 0x3b4654, metalness: 0.6, roughness: 0.5 }));
+      base.position.y = 0.8; base.castShadow = true; base.receiveShadow = true; grp.add(base);
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0x35ff9a, emissive: 0x16cc77, emissiveIntensity: 1.6 }));
+      core.position.y = 1.9; grp.add(core);
+      const light = new THREE.PointLight(0x4dffb0, 1.6, 12, 2); light.position.y = 2.2; grp.add(light);
+      const postMat = new THREE.MeshStandardMaterial({ color: 0x222831, metalness: 0.5, roughness: 0.6 });
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.2, 0.18), postMat);
+        post.position.set(sx * 0.95, 1.1, sz * 0.95); post.castShadow = true; grp.add(post);
+      }
+      grp.position.set(gx, 0, gz); scene.add(grp);
+      // 머리 위 체력바(스프라이트)
+      const cv = document.createElement('canvas'); cv.width = 160; cv.height = 26;
+      const hbTex = new THREE.CanvasTexture(cv);
+      const hbSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: hbTex, depthTest: false }));
+      hbSprite.position.set(0, 3.2, 0); hbSprite.scale.set(2.4, 0.4, 1); hbSprite.raycast = () => {};
+      grp.add(hbSprite);
+      generator = { group: grp, core, light, x: gx, z: gz, hp: 100, maxHp: 100,
+                    active: false, dead: false, hbCtx: cv.getContext('2d'), hbTex, hbSprite, hitFlashUntil: 0 };
+      obstacles.push({ minX: gx - 1.3, maxX: gx + 1.3, minZ: gz - 1.3, maxZ: gz + 1.3 });  // 통과 못 함
+      colliders.push(base);
+      drawGenBar();
+    }
+
+    // 발전기 체력바 그리기
+    function drawGenBar() {
+      if (!generator) return;
+      const ctx = generator.hbCtx, w = 160, h = 26;
+      const r = Math.max(0, generator.hp / generator.maxHp);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = r > 0.5 ? '#35ff9a' : r > 0.25 ? '#ffd23f' : '#ff5a5a';
+      ctx.fillRect(2, 2, (w - 4) * r, h - 4);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Segoe UI';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🔋 ' + Math.ceil(generator.hp), w / 2, h / 2);
+      generator.hbTex.needsUpdate = true;
+    }
+
+    // 발전기가 좀비에게 맞음
+    function damageGenerator(dmg) {
+      if (!generator || !generator.active || generator.dead || gameOver) return;
+      generator.hp -= dmg;
+      generator.hitFlashUntil = clock.getElapsedTime() + 0.25;
+      objBoxEl.classList.add('gen-hit');                          // 목표 박스 빨갛게 번쩍(경고)
+      setTimeout(() => objBoxEl.classList.remove('gen-hit'), 250);
+      beep(110, 0.12, 'square', 0.22);
+      if (generator.hp <= 0) {        // 발전기 파괴 → 게임오버
+        generator.hp = 0; generator.dead = true; drawGenBar();
+        endGame('🔋 발전기가 파괴되었습니다!'); return;
+      }
+      drawGenBar();
+    }
+
+    // 발전기 연출 갱신(비콘 맥동 / 피격 번쩍 / 코어 둥실)
+    function updateGenerator(delta, now) {
+      if (!generator) return;
+      generator.hbSprite.visible = generator.active && !generator.dead;
+      generator.light.intensity = generator.active ? (1.2 + Math.sin(now * 4) * 0.5) : 0.5;
+      if (now < generator.hitFlashUntil) generator.core.material.emissive.setHex(0xff2222);
+      else if (generator.dead)          generator.core.material.emissive.setHex(0x331111);
+      else                              generator.core.material.emissive.setHex(generator.active ? 0x16cc77 : 0x0a5a33);
+      generator.core.position.y = 1.9 + Math.sin(now * 2) * 0.06;
+      generator.core.rotation.y += delta * 1.5;
+    }
+
+    // 목표용 물건을 놓을 빈 땅 좌표 찾기(엄폐물/중앙/시작지점 피함)
+    function randGroundPos() {
+      for (let t = 0; t < 30; t++) {
+        const x = (Math.random() * 2 - 1) * (ARENA - 6);
+        const z = (Math.random() * 2 - 1) * (ARENA - 6);
+        if (Math.hypot(x, z) < 5) continue;            // 중앙 엄폐물 회피
+        if (Math.hypot(x, z - 25) < 7) continue;       // 플레이어 시작 위치 회피
+        let bad = false;
+        for (const o of obstacles)
+          if (x > o.minX - 1 && x < o.maxX + 1 && z > o.minZ - 1 && z < o.maxZ + 1) { bad = true; break; }
+        if (!bad) return { x, z };
+      }
+      return { x: 0, z: 18 };
+    }
+
+    // 📦 보급품 상자 n개 (회수 목표)
+    function spawnCrates(n) {
+      for (let i = 0; i < n; i++) {
+        const pos = randGroundPos();
+        const grp = new THREE.Group();
+        const core = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9),
+          new THREE.MeshStandardMaterial({ color: 0xb6892f, metalness: 0.2, roughness: 0.7, emissive: 0x3a2a00 }));
+        core.position.y = 0.45; core.castShadow = true; grp.add(core);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 8, 12),
+          new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, opacity: 0.16, depthWrite: false }));
+        beam.position.y = 4; grp.add(beam);
+        grp.position.set(pos.x, 0, pos.z); scene.add(grp);
+        objCrates.push({ group: grp, core, x: pos.x, z: pos.z, taken: false });
+      }
+    }
+
+    // 🔌 스위치 n개 (작동 목표)
+    function spawnSwitches(n) {
+      for (let i = 0; i < n; i++) {
+        const pos = randGroundPos();
+        const grp = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.25),
+          new THREE.MeshStandardMaterial({ color: 0x444b55, metalness: 0.5, roughness: 0.6 }));
+        pole.position.y = 0.7; pole.castShadow = true; grp.add(pole);
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.12),
+          new THREE.MeshStandardMaterial({ color: 0xcc3333, emissive: 0x661111, emissiveIntensity: 1.0 }));
+        panel.position.set(0, 1.5, 0); grp.add(panel);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 8, 10),
+          new THREE.MeshBasicMaterial({ color: 0xff8a8a, transparent: true, opacity: 0.13, depthWrite: false }));
+        beam.position.y = 4; grp.add(beam);
+        grp.position.set(pos.x, 0, pos.z); scene.add(grp);
+        objSwitches.push({ group: grp, panel, beam, x: pos.x, z: pos.z, on: false });
+      }
+    }
+
+    // 매 프레임: 상자 회수 / 스위치 작동 / 생존 추가 스폰 처리
+    function checkObjectiveProgress(now, p) {
+      if (!objective || objective.done || now < graceUntil) return;
+      if (objective.key === 'collect') {
+        for (const c of objCrates) {
+          if (c.taken) continue;
+          if (Math.hypot(p.x - c.x, p.z - c.z) < 1.9) {
+            c.taken = true; objCollected++;
+            scene.remove(c.group);
+            coins += 10; runCoinsEarned += 10;
+            beep(900, 0.1, 'sine');
+            showToast(`📦 보급품 회수! (${objCollected}/${objCrates.length})`, 1.0);
+            updateHUD();
+          }
+        }
+      }
+      if (objective.key === 'switches') {
+        for (const s of objSwitches) {
+          if (s.on) continue;
+          if (Math.hypot(p.x - s.x, p.z - s.z) < 2.2) {
+            s.on = true; objSwitchOn++;
+            s.panel.material.color.setHex(0x35ff6a);
+            s.panel.material.emissive.setHex(0x14aa33);
+            s.beam.material.color.setHex(0x9fffb0);
+            beep(800, 0.12, 'square');
+            showToast(`🔌 스위치 작동! (${objSwitchOn}/${objSwitches.length})`, 1.0);
+          }
+        }
+      }
+      if (objective.key === 'survive' && now < objSurviveUntil) {
+        if (now >= objSurviveSpawnAt && zombies.length < 16) {
+          spawnZombie(false);
+          if (Math.random() < 0.5) spawnZombie(false);
+          objSurviveSpawnAt = now + 3.5;       // 3.5초마다 새 무리
+        }
+      }
+    }
+
+    // 화면 위 목표 박스 갱신(매 프레임)
+    function updateObjHud(now) {
+      if (!objective) { objBoxEl.style.display = 'none'; return; }
+      objBoxEl.style.display = '';
+      objTextEl.textContent = objective.label;
+      let prog = '';
+      switch (objective.key) {
+        case 'eliminate': prog = `남은 좀비: ${zombies.length}`; break;
+        case 'defend':
+          prog = generator ? `발전기 HP: ${Math.max(0, Math.ceil(generator.hp))} / ${generator.maxHp}　|　남은 좀비: ${zombies.length}` : '';
+          break;
+        case 'survive': {
+          const left = Math.max(0, Math.ceil(objSurviveUntil - Math.max(now, graceUntil)));
+          prog = `남은 시간: ${left}초`; break;
+        }
+        case 'collect':  prog = `보급품: ${objCollected} / ${objCrates.length}`; break;
+        case 'switches': prog = `스위치: ${objSwitchOn} / ${objSwitches.length}`; break;
+        case 'bossweak': {
+          const b = zombies.find(z => z.isBoss);
+          prog = b ? `보스 HP(약점): ${Math.max(0, Math.ceil(b.hp))} / ${b.maxHp}` : '약점 파괴 완료!'; break;
+        }
+      }
+      objProgEl.textContent = prog;
+    }
+
+    // 목표 달성했는지 검사 → 달성 시 웨이브 완료
+    function checkObjective(now) {
+      if (!objective || objective.done || gameOver || now < graceUntil) return;
+      let done = false;
+      switch (objective.key) {
+        case 'eliminate':
+        case 'defend':   done = zombies.length === 0; break;
+        case 'survive':  done = now >= objSurviveUntil; break;
+        case 'collect':  done = objCrates.length > 0 && objCollected >= objCrates.length; break;
+        case 'switches': done = objSwitches.length > 0 && objSwitchOn >= objSwitches.length; break;
+        case 'bossweak': done = !zombies.some(z => z.isBoss); break;
+      }
+      if (done) { objective.done = true; completeWave(); }
+    }
+
+    // 남은 좀비 모두 쓰러뜨려 정리(전멸/방어 외 목표 클리어 시)
+    function despawnAllZombies() {
+      for (const z of [...zombies]) {
+        zombieLookup.delete(z.group.id);
+        if (z.isBoss) removeDashWarn(z);
+        z.group.traverse(o => { if (o.isMesh && o.material) o.material.transparent = true; if (o.isSprite) o.visible = false; });
+        dyingZombies.push({ group: z.group, life: 0 });
+      }
+      zombies.length = 0;
+      bossbarEl.classList.remove('on', 'weak');
+    }
+
+    // 이번 웨이브에 놓았던 상자/스위치 정리
+    function clearWaveObjects() {
+      for (const c of objCrates) scene.remove(c.group);
+      objCrates.length = 0; objCollected = 0;
+      for (const s of objSwitches) scene.remove(s.group);
+      objSwitches.length = 0; objSwitchOn = 0;
+    }
+
+    // 웨이브 완료 처리 (예전엔 killZombie 안에 있던 보너스/상점 로직을 이리로 모음)
+    function completeWave() {
+      if (gameOver) return;
+      if (generator && !generator.dead) {       // 방어 성공 → 발전기 일부 수리 + 휴식
+        generator.active = false;
+        generator.hp = Math.min(generator.maxHp, generator.hp + 30);
+        drawGenBar();
+      }
+      despawnAllZombies();
+      clearWaveObjects();
+      wave++;
+      comboCount = 0; comboUntil = 0;
+      const bonus = 20 + wave * 5;
+      coins += bonus; runCoinsEarned += bonus;
+      score += 200;
+      runMissionsDone++;                        // 목표 완료 = 미션 완료 통계
+      if (!(waveCondition && waveCondition.key === 'lowammo')) {
+        grenades = Math.min(9, grenades + 1);
+        molotovs = Math.min(6, molotovs + 1);
+        if (WEAPONS.rocket.owned) rocketAmmo = Math.min(ROCKET_AMMO_CAP, rocketAmmo + 1);
+      }
+      showToast('✅ 목표 완료!', 1.2);
+      updateHUD();
+      setTimeout(openShop, 700);
+    }
+
+    // ---------- 웨이브 시작 ----------
+    function startWave() {
+      // 이번 웨이브 특수 조건 (3웨이브부터 55% 확률)
+      scene.fog.near = FOG_NEAR; scene.fog.far = FOG_FAR;   // 안개 초기화
+      waveCondition = (wave >= 3 && Math.random() < 0.55)
+        ? WAVE_CONDITIONS[Math.floor(Math.random() * WAVE_CONDITIONS.length)] : null;
+      if (waveCondition && waveCondition.key === 'fog') { scene.fog.near = 8; scene.fog.far = 48; }
+
+      // 이번 웨이브 목표 정하기 + 이전 웨이브 잔여물 정리
+      clearWaveObjects();
+      chooseObjective();
+
+      // 좀비 수: 후반에 한꺼번에 너무 많이 안 몰리게 완만하게 증가
+      // (생존 목표는 시간 동안 계속 추가 스폰되므로 처음엔 조금 적게)
+      const count = (objective.key === 'survive' ? 3 : 4) + Math.floor(wave * 1.6);
+      for (let i = 0; i < count; i++) spawnZombie(false);
+      if (wave % 5 === 0) spawnZombie(true); // 5웨이브마다 보스!
+
+      const t = clock.getElapsedTime();
+      graceUntil = t + 4;                              // 준비시간(이때 B로 무기 상점) — 템포 위해 4초로 단축
+      supplyNextAt = t + 10 + Math.random() * 8;       // 첫 보급상자 타이밍
+
+      // 목표별 준비물 배치 (준비시간이 끝나면 판정 시작)
+      if (objective.key === 'defend') { ensureGenerator(); generator.active = true; }
+      else if (generator) { generator.active = false; }   // 방어 웨이브 아니면 발전기 무적/무시
+      if (objective.key === 'collect')  spawnCrates(3);
+      if (objective.key === 'switches') spawnSwitches(3);
+      if (objective.key === 'survive')  { objSurviveUntil = graceUntil + 55; objSurviveSpawnAt = graceUntil + 2; }
+
+      updateHUD();
+    }
+
+    // ---------- 총 쏘기 ----------
+    const raycaster = new THREE.Raycaster();
+    const aim = new THREE.Vector2();
+    const losRay = new THREE.Raycaster();   // 체력바 시야 가림 판정용
+    const _vHead = new THREE.Vector3();
+    const _vDir = new THREE.Vector3();
+
+    addEventListener('mousedown', (e) => {
+      if (!controls.isLocked || gameOver) return;
+      if (e.button === 2) {                            // 우클릭
+        if (WEAPONS[equipped].melee) { meleeAttack(true); return; }   // 🔪 칼 = 강한 광역 베기
+        aiming = true; return;                         // 총 = 정조준(ADS/줌)
+      }
+      if (e.button !== 0) return;
+      firing = true;                    // 누르고 있는 동안 true (연사 무기용)
+      // 단발 무기는 여기서 한 발, 연사 무기도 첫 발은 여기서
+      if (clock.getElapsedTime() - lastShot >= WEAPONS[equipped].fireDelay) doShoot();
+    });
+    addEventListener('mouseup', (e) => {
+      if (e.button === 0) firing = false;
+      if (e.button === 2) aiming = false;
+    });
+    addEventListener('contextmenu', (e) => e.preventDefault());  // 우클릭 메뉴 막기
+    // 마우스를 빠르게 움직이면 총이 살짝 늦게 따라옴(무게감)
+    addEventListener('mousemove', (e) => {
+      if (!controls.isLocked) return;
+      swayTX = Math.max(-0.06, Math.min(0.06, swayTX - e.movementX * 0.0006));
+      swayTY = Math.max(-0.05, Math.min(0.05, swayTY - e.movementY * 0.0006));
+    });
+
+    // 마우스 휠로 무기 바꾸기 (가지고 있는 총만 순환)
+    let wheelLast = -999;
+    addEventListener('wheel', (e) => {
+      if (!controls.isLocked || gameOver) return;
+      const t = clock.getElapsedTime();
+      if (t - wheelLast < 0.12) return;          // 트랙패드 등 빠른 연속 휠 방지
+      const owned = [...WEAPON_ORDER, 'knife'].filter(k => WEAPONS[k].owned);  // 🔪 칼도 휠 순환에 포함
+      if (owned.length < 2) return;
+      wheelLast = t;
+      let idx = owned.indexOf(equipped);
+      idx = (idx + (e.deltaY > 0 ? 1 : -1) + owned.length) % owned.length;
+      trySwitch(owned[idx]);
+    }, { passive: true });
+
+    function doShoot() {
+      const W = WEAPONS[equipped];
+      if (W.melee) { meleeAttack(false); return; }   // 🔪 칼 좌클릭 = 빠른 약베기
+      if (reloading) return;
+      if (ammo <= 0 && !ultActive()) { beep(120, 0.08, 'square', 0.1); reload(); return; }
+      if (!ultActive()) ammo--;        // ⚡ 오버드라이브 중엔 탄약 무한(줄지 않음)
+      W.stat.shots++;                                          // 숙련도: 사용 탄 수
+      runWeaponShots[equipped] = (runWeaponShots[equipped] || 0) + 1;
+      lastShot = clock.getElapsedTime();
+      updateHUD();
+      beep(700, 0.05);
+
+      // 반동: 앉으면 줄고, 정조준하면 더 줄어듦. 소총 숙련도면 반동↓
+      const recoilMul = (1 - 0.45 * adsAmount) * (equipped === 'rifle' ? (1 - 0.07 * masteryLevel('rifle')) : 1);
+      const rc = W.recoil * recoilMul;
+      recoilZ = 0.14 * rc;
+      recoilPitch = 0.22 * rc;
+      shake += 0.07 * rc * settings.shake;
+      bloom = Math.min(1.5, bloom + 0.28 * rc);
+      // 화면이 위로 확 튐 (PC라서 더 세게) — 앉기/정조준으로 잡을 수 있음
+      viewRecoil = Math.min(0.16, viewRecoil + 0.022 * rc);
+      muzzleFlash.visible = true;
+      muzzleLight.intensity = 4;       // 총구 불빛 번쩍
+      muzzleOffAt = lastShot + 0.035;
+      // 미니건: 쏠 때마다 총열 다발 빙글빙글
+      const bm = gunModels[equipped].userData.barrels;
+      if (bm) bm.rotation.z += 0.7;
+
+      // 샷건 숙련도: 근거리 데미지 증가(감쇠 전 기본 데미지에 더해짐)
+      const baseDmg = W.dmg + gunPower + tempPower + (equipped === 'shotgun' ? 0.3 * masteryLevel('shotgun') : 0);
+
+      // 🚀 로켓런처: 부딪힌 지점에서 폭발 (좀비/벽/바닥 중 가장 가까운 곳)
+      if (W.explosive) {
+        raycaster.setFromCamera(aim.set(0, 0), camera);
+        const zHits = raycaster.intersectObjects(zombies.map(z => z.group), true);
+        const wHits = raycaster.intersectObjects(colliders, false);
+        const zd = zHits.length ? zHits[0].distance : Infinity;
+        const wd = wHits.length ? wHits[0].distance : Infinity;
+        let pt;
+        if (zHits.length && zd <= wd) pt = zHits[0].point;
+        else if (wHits.length) pt = wHits[0].point;
+        else {  // 허공: 바닥(y=0)과 만나는 지점
+          const dir = raycaster.ray.direction, org = raycaster.ray.origin;
+          if (dir.y < -0.001) { const t = -org.y / dir.y; pt = org.clone().addScaledVector(dir, Math.min(t, 80)); }
+          else pt = org.clone().addScaledVector(dir, 60);
+        }
+        // 로켓 숙련도: 폭발 범위 증가. 폭발 킬은 'rocket'으로 집계
+        explode(pt.x, Math.max(0.3, pt.y), pt.z, 8 + masteryLevel('rocket') * 0.6, baseDmg * 6, 'rocket');
+        if (ammo <= 0) reload();   // 예비탄 있으면 자동 장전, 없으면 빈 소리
+        return;
+      }
+
+      // 일반 총: 펠릿(샷건) × 관통 × 크리티컬
+      const maxPierce = 1 + (W.pierce || 0) + pierceBonus;   // 한 발이 뚫는 좀비 수
+      const hitMap = new Map();   // 이번 발사에서 맞은 좀비별 총 데미지
+      const spreadMul = equipped === 'smg' ? (1 - 0.06 * masteryLevel('smg')) : 1;     // SMG 숙련도: 탄퍼짐↓
+      const headMult = HEADSHOT_MULT + (equipped === 'sniper' ? 0.25 * masteryLevel('sniper') : 0); // 저격 숙련도: 헤드샷 배율↑
+      for (let i = 0; i < W.pellets; i++) {
+        const sp = (W.spread * spreadMul + bloom * 0.04) * (1 - 0.7 * adsAmount); // 정조준하면 명중률↑
+        aim.set((Math.random()*2-1) * sp, (Math.random()*2-1) * sp);
+        raycaster.setFromCamera(aim, camera);
+        const hits = raycaster.intersectObjects(zombies.map(z => z.group), true);
+        let pierced = 0;
+        const seen = new Set();
+        for (const h of hits) {
+          const z = zombieLookup.get(h.object.userData.zombieGroupId);
+          if (!z || seen.has(z)) continue;
+          seen.add(z);
+          const head = h.object.userData.isHead === true;   // 머리 맞았나
+          let dmg = baseDmg;
+          // 거리감쇠: 기관단총·샷건은 멀수록 약함
+          if (W.falloffStart && h.distance > W.falloffStart) {
+            const f = Math.min(1, (h.distance - W.falloffStart) / (W.falloffEnd - W.falloffStart));
+            dmg *= (1 - f) + f * W.falloffMin;
+          }
+          if (head) dmg *= headMult;                         // 헤드샷 추가 데미지(저격 숙련도 반영)
+          const crit = critChance > 0 && Math.random() < critChance;
+          if (crit) dmg *= 2;
+          dmg = Math.max(1, Math.round(dmg));
+          const e = hitMap.get(z) || { dmg: 0, point: h.point.clone(), crit: false, head: false };
+          e.dmg += dmg; if (crit) e.crit = true; if (head) e.head = true;
+          hitMap.set(z, e);
+          pierced++;
+          if (pierced >= maxPierce) break;   // 관통 한계까지만
+        }
+      }
+      // 맞은 좀비마다 데미지 숫자 띄우고 데미지 적용
+      for (const [z, e] of hitMap) {
+        const shown = z.dmgResist ? Math.max(1, Math.round(e.dmg * (1 - z.dmgResist))) : e.dmg;
+        if (e.head) {
+          beep(1400, 0.05, 'square', 0.12);   // 헤드샷 소리
+          W.stat.hs++; runHeadshots++;        // 숙련도/기록: 헤드샷 수
+          const nowT = clock.getElapsedTime();
+          hsStreak = (nowT < hsStreakUntil) ? hsStreak + 1 : 1;
+          hsStreakUntil = nowT + 2.0;
+          if (hsStreak >= 3) { coins += 5; runCoinsEarned += 5; }   // 연속 헤드샷 보너스 코인
+          if (nowT > headshotToastUntil) {     // 너무 자주 안 뜨게 0.5초 간격
+            headshotToastUntil = nowT + 0.5;
+            showToast('💥 HEADSHOT!' + (hsStreak >= 3 ? ` x${hsStreak} 💰` : ''), 0.5);
+          }
+        }
+        spawnDamageNumber(e.point, shown, e.crit, e.head);
+        applyDamage(z, e.dmg, equipped, e.head, false);   // 감소율은 applyDamage 내부에서 적용
+      }
+
+      if (ammo <= 0) reload();
+    }
+
+    // 🔪 칼 공격 "시작" — 모션만 켜고, 실제 데미지는 모션 중 hit 시점에 doKnifeHit()이 처리
+    //   heavy=false(좌클릭): 빠른 찌르기/베기, 정면 가장 가까운 1마리. 방향 좌우 번갈아.
+    //   heavy=true (우클릭): 느리지만 묵직한 큰 베기, 정면 넓은 부채꼴 안 모든 좀비.
+    const _mfwd = new THREE.Vector3();
+    function meleeAttack(heavy) {
+      if (equipped !== 'knife' || gameOver || !controls.isLocked) return;
+      const ka = knifeAnim;
+      // 쿨타임: 공격/꺼내기 모션 중엔 새 공격 무시(겹침 방지). Idle/Run/Inspect는 즉시 가능(Inspect는 취소됨)
+      if (ka.state === 'Knife_Attack' || ka.state === 'Knife_HeavyAttack' || ka.state === 'Knife_Equip') return;
+      ka.state = heavy ? 'Knife_HeavyAttack' : 'Knife_Attack';
+      ka.t = 0; ka.heavy = heavy; ka.hitDone = false;
+      ka.dir = heavy ? 1 : -ka.dir;               // 약공격은 좌우 번갈아, 강공격은 한 방향
+      lastShot = clock.getElapsedTime();
+      beep(heavy ? 200 : 320, 0.06, 'square', 0.14);   // 휘두르는 바람 소리
+      shake += (heavy ? 0.06 : 0.03) * settings.shake; // 화면 흔들림은 적당히만
+    }
+
+    // 실제 베기 판정 (모션의 hit 시점에 1회 호출)
+    function doKnifeHit(heavy) {
+      const W = WEAPONS.knife;
+      camera.getWorldDirection(_mfwd);
+      const pp = controls.getObject().position;
+      const fLen = Math.hypot(_mfwd.x, _mfwd.z) || 1;
+      const range = heavy ? 3.4 : 2.8;
+      const minDot = heavy ? 0.25 : 0.4;          // 강공격은 더 넓은 부채꼴
+      const dmg = Math.max(1, Math.round((heavy ? W.dmg * 2.4 : W.dmg) + gunPower + tempPower));
+      let best = null, bestd = 1e9, hitAny = false;
+      for (const z of zombies) {
+        const zp = z.group.position;
+        const vx = zp.x - pp.x, vz = zp.z - pp.z;
+        const d = Math.hypot(vx, vz);
+        if (d > range) continue;
+        const dot = (_mfwd.x * vx + _mfwd.z * vz) / (fLen * (d || 1));
+        if (dot < minDot) continue;               // 앞쪽(부채꼴 안)만
+        if (heavy) {                              // 강공격: 범위 내 전부 타격
+          spawnDamageNumber(new THREE.Vector3(zp.x, 1.4, zp.z), dmg);
+          applyDamage(z, dmg, 'knife', false, false);
+          hitAny = true;
+        } else if (d < bestd) { bestd = d; best = z; }   // 약공격: 가장 가까운 1마리
+      }
+      if (!heavy && best) {
+        spawnDamageNumber(new THREE.Vector3(best.group.position.x, 1.4, best.group.position.z), dmg);
+        applyDamage(best, dmg, 'knife', false, false);
+        hitAny = true;
+      }
+      if (hitAny) {
+        W.stat.shots++;
+        runWeaponShots.knife = (runWeaponShots.knife || 0) + 1;
+        beep(900, 0.05, 'square', 0.1);           // 명중 소리
+      }
+    }
+
+    function applyDamage(z, dmg, weapon, head, explosive) {
+      if (gameOver) return;                       // 죽은 뒤엔 좀비 처리/코인 정산 안 함
+      if (ultActive() && weapon) dmg = Math.round(dmg * 1.6);   // ⚡ 오버드라이브: 무기 데미지 1.6배(충격파 자체는 제외)
+      if (z.dmgResist) dmg = Math.max(1, Math.round(dmg * (1 - z.dmgResist)));   // 아머 좀비: 피해 감소
+      // 보스 약점 시간: 큰 공격 후 빈틈 → 피해 1.8배 (헤드샷이면 더 큼)
+      if (z.isBoss && z.weakUntil && clock.getElapsedTime() < z.weakUntil) dmg = Math.round(dmg * 1.8);
+      if (z.isBoss && weapon && WEAPONS[weapon]) WEAPONS[weapon].stat.bossDmg += dmg;   // 숙련도: 보스에 준 피해
+      z.hp -= dmg;
+      beep(300, 0.04, 'sawtooth');
+      // 보스 체력 50% 이하 첫 도달 시 좀비 소환 (한 번만)
+      if (z.isBoss && !z.summonedHalf && z.hp > 0 && z.hp <= z.maxHp * 0.5) { z.summonedHalf = true; bossSummon(z); }
+      // 맞으면 잠깐 빨갛게 (체력바 스프라이트는 emissive가 없어서 안 변함)
+      z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0xff0000); });
+      setTimeout(() => {
+        z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0x000000); });
+      }, 70);
+      if (z.hp <= 0) killZombie(z, weapon, explosive);
+      else drawHealthBar(z);
+    }
+
+    // ---------- 떠오르는 데미지 숫자 ----------
+    const floaters = [];
+    function spawnDamageNumber(pos, dmg, crit = false, head = false) {
+      if (floaters.length > 30) {   // 너무 많으면 오래된 것부터 정리
+        const old = floaters.shift();
+        scene.remove(old.sprite); old.mat.dispose(); old.tex.dispose();
+      }
+      const big = crit || head;
+      const canvas = document.createElement('canvas');
+      canvas.width = 96; canvas.height = 48;
+      const ctx = canvas.getContext('2d');
+      ctx.font = big ? 'bold 42px Segoe UI' : 'bold 32px Segoe UI';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = big ? 6 : 5; ctx.strokeStyle = '#000';
+      // 헤드샷=빨강, 크리티컬=주황, 일반=노랑
+      ctx.fillStyle = head ? '#ff2e2e' : crit ? '#ff9a3c' : '#ffe45c';
+      const txt = big ? (dmg + '!') : ('' + dmg);
+      ctx.strokeText(txt, 48, 24);
+      ctx.fillText(txt, 48, 24);
+      const tex = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+      const sp = new THREE.Sprite(mat);
+      sp.position.copy(pos);
+      sp.position.x += (Math.random() - 0.5) * 0.4;
+      sp.scale.set(big ? 1.05 : 0.8, big ? 0.52 : 0.44, 1);
+      scene.add(sp);
+      floaters.push({ sprite: sp, life: 0, tex, mat });
+    }
+    function updateFloaters(delta) {
+      for (let i = floaters.length - 1; i >= 0; i--) {
+        const f = floaters[i];
+        f.life += delta;
+        f.sprite.position.y += delta * 1.6;     // 위로 떠오름
+        f.mat.opacity = Math.max(0, 1 - f.life / 0.7);
+        if (f.life >= 0.7) {
+          scene.remove(f.sprite);
+          f.mat.dispose(); f.tex.dispose();
+          floaters.splice(i, 1);
+        }
+      }
+    }
+
+    const dyingZombies = [];   // 쓰러지는 중인 좀비들
+    function killZombie(zombie, weapon, explosive) {
+      zombieLookup.delete(zombie.group.id);
+      const idx = zombies.indexOf(zombie);
+      if (idx >= 0) zombies.splice(idx, 1);
+      if (zombie.isBoss) { removeDashWarn(zombie); runBossKills++; }   // 보스 죽으면 돌진 경고선 제거 + 기록
+      if (zombie.onDeathFire) createFire(zombie.group.position.x, zombie.group.position.z);  // 화염 좀비: 죽을 때 불바다
+      if (weapon && WEAPONS[weapon]) { WEAPONS[weapon].stat.kills++; if (explosive) WEAPONS[weapon].stat.expKills++; }  // 숙련도: 킬/폭발킬
+      kills++;
+      // 콤보: 짧은 시간(2.5초) 안에 연속 처치하면 점수/코인 보너스
+      const nowK = clock.getElapsedTime();
+      comboCount = (nowK < comboUntil) ? comboCount + 1 : 1;
+      comboUntil = nowK + 2.5;
+      runBestCombo = Math.max(runBestCombo, comboCount);
+      const coinMul = comboCount >= 5 ? 1.1 : 1;     // 5콤보: 코인 +10%
+      const scoreMul = comboCount >= 3 ? 1.1 : 1;    // 3콤보: 점수 +10%
+      const gain = Math.round(zombie.coin * coinMul);
+      coins += gain; runCoinsEarned += gain;
+      score += Math.round((zombie.isBoss ? 500 : 100) * scoreMul);
+      if (comboCount >= 3) showComboText(comboCount + ' COMBO!' + (comboCount >= 5 ? ' 💰+10%' : ''));
+      beep(zombie.isBoss ? 220 : 500, 0.14, 'triangle');
+      // ⚡ 궁극기 충전: 일반 +4, 보스 +35 (오버드라이브 중엔 충전 안 함)
+      if (!ultActive()) {
+        ultCharge = Math.min(ULT_MAX, ultCharge + (zombie.isBoss ? 35 : 4));
+        if (ultCharge >= ULT_MAX && !ultReadyAnnounced) {
+          ultReadyAnnounced = true;
+          showToast('⚡ 궁극기 준비 완료! <span style="font-size:20px">X 키로 발동</span>', 1.6);
+          beep(720, 0.18, 'triangle', 0.18);
+        }
+      }
+      updateHUD();
+
+      // 죽음 연출: 앞으로 쓰러지며 사라짐
+      zombie.group.traverse(o => {
+        if (o.isMesh && o.material) o.material.transparent = true;
+        if (o.isSprite) o.visible = false;     // 체력바 숨김
+      });
+      dyingZombies.push({ group: zombie.group, life: 0 });
+
+      // ※ 웨이브 클리어 판정은 이제 checkObjective()(목표 시스템)가 매 프레임 처리한다.
+      //   '전멸/방어' 목표는 좀비가 0이 되면, 다른 목표는 각자 조건 달성 시 completeWave() 호출.
+    }
+    function updateDying(delta) {
+      for (let i = dyingZombies.length - 1; i >= 0; i--) {
+        const d = dyingZombies[i];
+        d.life += delta;
+        const t = Math.min(1, d.life / 0.7);
+        d.group.rotation.x = t * (Math.PI / 2);   // 앞으로 쓰러짐
+        d.group.position.y = -t * 0.5;             // 살짝 가라앉음
+        d.group.traverse(o => { if (o.isMesh && o.material) o.material.opacity = 1 - t; });
+        if (t >= 1) { scene.remove(d.group); dyingZombies.splice(i, 1); }
+      }
+    }
+
+    // ---------- 적 투사체 (보스 화염구 / 스피터 산성침) + 충격파 ----------
+    const bossProjectiles = [];
+    const shockwaves = [];
+
+    // 그룹(코어+후광 등) 통째로 메모리 정리
+    function disposeObj(o) {
+      o.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    }
+
+    // 빛나는 에너지 구체: 속 코어 + 겉 후광 — 그냥 원보다 게임다운 발사체
+    function makeEnergyBall(coreCol, glowCol, size) {
+      const grp = new THREE.Group();
+      const core = new THREE.Mesh(new THREE.SphereGeometry(size, 14, 14),
+        new THREE.MeshStandardMaterial({ color: coreCol, emissive: coreCol, emissiveIntensity: 2.4 }));
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(size * 1.9, 14, 14),
+        new THREE.MeshBasicMaterial({ color: glowCol, transparent: true, opacity: 0.35,
+          blending: THREE.AdditiveBlending, depthWrite: false }));
+      grp.add(core); grp.add(glow);
+      return grp;
+    }
+
+    // 보스 화염구 일제사격 (텔레그래프 끝난 뒤 실행됨)
+    function fireBossAttack(z, p) {
+      const bp = z.group.position;
+      const baseAng = Math.atan2(p.x - bp.x, p.z - bp.z);
+      const pattern = Math.floor(Math.random() * 3); // 0:단발 1:3갈래 2:5갈래
+      const offsets = pattern === 0 ? [0]
+                    : pattern === 1 ? [-0.22, 0, 0.22]
+                    : [-0.4, -0.2, 0, 0.2, 0.4];
+      const dmg = 15 + Math.floor(wave * 0.6);
+      for (const off of offsets) {
+        const a = baseAng + off;
+        const mesh = makeEnergyBall(0xffd24a, 0xff5a10, 0.34);
+        mesh.position.set(bp.x, 2.6, bp.z);
+        scene.add(mesh);
+        const sp = 15;
+        bossProjectiles.push({ mesh, vx: Math.sin(a) * sp, vz: Math.cos(a) * sp, life: 0, dmg, hitR: 1.4, spin: 0 });
+      }
+      beep(80, 0.25, 'sawtooth', 0.2);
+    }
+
+    // 스피터 좀비: 산성 침 발사 (원거리 좀비)
+    function spitterAttack(z, p) {
+      const bp = z.group.position;
+      const a = Math.atan2(p.x - bp.x, p.z - bp.z);
+      const mesh = makeEnergyBall(0x8cff3a, 0x3aff10, 0.26);
+      mesh.position.set(bp.x, 1.5, bp.z);
+      scene.add(mesh);
+      const sp = 17;
+      bossProjectiles.push({ mesh, vx: Math.sin(a) * sp, vz: Math.cos(a) * sp, life: 0, dmg: 8, hitR: 1.1, spin: 0 });
+      beep(420, 0.12, 'square', 0.12);
+    }
+
+    // 보스 강타: 가까이 붙으면 땅을 내리쳐 충격파 (텔레그래프 끝난 뒤 실행)
+    function bossSlam(z, p) {
+      const bp = z.group.position;
+      const R = 8;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.45, 1.0, 40),
+        new THREE.MeshBasicMaterial({ color: 0xff7722, transparent: true, opacity: 0.85,
+          side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(bp.x, 0.1, bp.z);
+      scene.add(ring);
+      shockwaves.push({ mesh: ring, life: 0, max: 0.55, R });
+      const d = Math.hypot(p.x - bp.x, p.z - bp.z);   // 텔레그래프 끝나는 시점 기준 → 도망치면 회피 가능
+      if (d < R) takeDamage(Math.max(10, 34 - Math.floor(d * 2)), bp.x, bp.z);   // 가까울수록 아픔
+      shake += 0.6 * settings.shake;
+      beep(55, 0.4, 'square', 0.25);
+    }
+
+    function updateShockwaves(delta) {
+      for (let i = shockwaves.length - 1; i >= 0; i--) {
+        const s = shockwaves[i];
+        s.life += delta;
+        const t = s.life / s.max;
+        s.mesh.scale.setScalar(0.6 + t * s.R);
+        s.mesh.material.opacity = 0.85 * (1 - t);
+        if (t >= 1) { scene.remove(s.mesh); disposeObj(s.mesh); shockwaves.splice(i, 1); }
+      }
+    }
+
+    // ⚡ 궁극기(오버드라이브) 발동: 거대 충격파 + 6초 강화 모드
+    const ultflashEl = document.getElementById('ultflash');
+    function activateUlt() {
+      if (!controls.isLocked || gameOver || ultActive()) return;
+      if (ultCharge < ULT_MAX) { beep(140, 0.1, 'square', 0.12); showToast('⚡ 궁극기 충전 중...', 0.7); return; }
+      ultCharge = 0; ultReadyAnnounced = false;
+      const now = clock.getElapsedTime();
+      ultActiveUntil = now + 6;                          // 6초 오버드라이브(무적·무한탄약·강화)
+      health = Math.min(maxHealth, health + 25);         // 발동 시 약간 회복
+      document.body.classList.add('overdrive');
+      // 플레이어 중심 거대 충격파: 모든 좀비에 큰 피해 + 바깥으로 넉백
+      const p = controls.getObject().position;
+      const blastDmg = 60 + wave * 10;
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        const z = zombies[i];
+        const zp = z.group.position;
+        const d = Math.hypot(zp.x - p.x, zp.z - p.z);
+        if (d > 42) continue;
+        applyDamage(z, z.isBoss ? (130 + wave * 18) : blastDmg, null, false, true);
+        if (zombies.indexOf(z) >= 0) {                   // 살아남으면 바깥으로 넉백(보스는 덜)
+          const nl = Math.max(0.5, d), kb = z.isBoss ? 2 : 6;
+          zp.x += (zp.x - p.x) / nl * kb; zp.z += (zp.z - p.z) / nl * kb;
+        }
+      }
+      // 황금 충격파 링 + 화면 번쩍 + 진동
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.5, 1.4, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffe45c, transparent: true, opacity: 0.9,
+          side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(p.x, 0.15, p.z);
+      scene.add(ring); shockwaves.push({ mesh: ring, life: 0, max: 0.7, R: 42 });
+      ultflashEl.style.opacity = '1'; setTimeout(() => { ultflashEl.style.opacity = '0'; }, 170);
+      shake += 1.1 * settings.shake;
+      beep(180, 0.5, 'sawtooth', 0.3); beep(520, 0.4, 'triangle', 0.2);
+      showToast('🔥 오버드라이브! <span style="font-size:20px">무적 · 무한탄약 · 강화</span>', 1.6);
+      updateHUD();
+    }
+    // 오버드라이브 종료 처리(매 프레임 체크) — 화면 테두리 효과 끔
+    function updateUlt() {
+      if (!ultActive() && document.body.classList.contains('overdrive')) {
+        document.body.classList.remove('overdrive');
+        updateHUD();
+      }
+    }
+
+    function clearBossGlow(z) {   // 보스 발광(빨강/하늘색) 원래대로
+      z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0x000000); });
+    }
+
+    // 🚩 돌진 경고선: 보스 → 플레이어 방향 바닥에 빨간 띠 (보고 피하라는 신호)
+    function makeDashWarn(z, p) {
+      const warn = new THREE.Mesh(new THREE.BoxGeometry(3, 0.05, 1),
+        new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.45, depthWrite: false }));
+      scene.add(warn); z.dashWarn = warn;
+      updateDashWarn(z, p);
+    }
+    function updateDashWarn(z, p) {
+      const w = z.dashWarn; if (!w) return;
+      const bp = z.group.position;
+      const dx = p.x - bp.x, dz = p.z - bp.z;
+      const ang = Math.atan2(dx, dz);
+      const len = Math.min(26, Math.hypot(dx, dz) + 2);
+      w.scale.set(1, 1, len);
+      w.rotation.y = ang;
+      w.position.set(bp.x + Math.sin(ang) * len / 2, 0.08, bp.z + Math.cos(ang) * len / 2);
+      w.material.opacity = 0.35 + Math.sin(clock.getElapsedTime() * 30) * 0.2;   // 점멸
+      z.dashAngle = ang;
+    }
+    function removeDashWarn(z) {
+      if (z.dashWarn) { scene.remove(z.dashWarn); z.dashWarn.geometry.dispose(); z.dashWarn.material.dispose(); z.dashWarn = null; }
+    }
+    // 💨 돌진 시작: 경고선 방향으로 고속 직진 (movement 루프에서 진행)
+    function bossDashStart(z, p, now) {
+      const ang = (z.dashAngle != null) ? z.dashAngle : Math.atan2(p.x - z.group.position.x, p.z - z.group.position.z);
+      const sp = 27;
+      z.dashing = true; z.dashHit = false;
+      z.dashVX = Math.sin(ang) * sp; z.dashVZ = Math.cos(ang) * sp;
+      z.dashUntil = now + 0.55;
+      beep(70, 0.3, 'sawtooth', 0.22);
+    }
+    // 🧟 50% 이하 소환: 보스 주변에 작은 좀비 3마리
+    function bossSummon(z) {
+      const bp = z.group.position;
+      for (let k = 0; k < 3; k++) {
+        const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 2;
+        spawnZombie(false, { x: bp.x + Math.cos(a) * r, z: bp.z + Math.sin(a) * r });
+      }
+      showToast('🧟 보스가 좀비를 소환했다!', 1.4);
+      beep(140, 0.4, 'sawtooth', 0.2);
+      updateHUD();
+    }
+
+    // 보스 전투 상태머신: 준비(텔레그래프) → 실행. 거리별 강타/돌진/화염구. 큰 공격 뒤 약점.
+    function updateBossCombat(z, p, now, dist) {
+      if (z.weakUntil && now < z.weakUntil) return;   // 약점 시간엔 새 공격 안 함(멈춤)
+      if (z.charging) {
+        if (now >= z.chargeUntil) {
+          z.charging = false;
+          clearBossGlow(z); removeDashWarn(z);
+          if (z.attackKind === 'slam') { bossSlam(z, p); z.weakUntil = now + 2.0; }
+          else if (z.attackKind === 'dash') { bossDashStart(z, p, now); }   // 약점은 돌진이 끝난 뒤
+          else fireBossAttack(z, p);                                        // 화염구는 가벼운 공격(약점 없음)
+          z.nextAttack = now + 1.8 + Math.random() * 1.5;
+        } else if (z.attackKind === 'dash') {
+          updateDashWarn(z, p);   // 준비 중 경고선을 플레이어 쪽으로 갱신
+        }
+        return;
+      }
+      if (now > z.nextAttack && dist < 44) {
+        z.attackKind = dist < 7 ? 'slam' : (dist < 24 ? 'dash' : 'volley');
+        z.charging = true;
+        z.chargeStart = now;
+        z.chargeUntil = now + (z.attackKind === 'dash' ? 0.85 : 0.7);
+        if (z.attackKind === 'dash') makeDashWarn(z, p);
+        beep(110, 0.5, 'square', 0.12);
+      }
+    }
+
+    // 화면 위 보스 체력바 (살아있는 보스가 있으면 표시, 약점이면 강조)
+    const bossbarEl = document.getElementById('bossbar');
+    function updateBossBar() {
+      let boss = null;
+      for (const z of zombies) if (z.isBoss) { boss = z; break; }
+      if (!boss) { bossbarEl.classList.remove('on', 'weak'); return; }
+      bossbarEl.classList.add('on');
+      document.getElementById('bossFill').style.width = Math.max(0, boss.hp / boss.maxHp * 100) + '%';
+      document.getElementById('bossName').textContent = '👹 보스';
+      bossbarEl.classList.toggle('weak', !!(boss.weakUntil && clock.getElapsedTime() < boss.weakUntil));
+    }
+
+    function updateBossProjectiles(delta, p) {
+      for (let i = bossProjectiles.length - 1; i >= 0; i--) {
+        const pr = bossProjectiles[i];
+        pr.life += delta;
+        const mp = pr.mesh.position;
+        mp.x += pr.vx * delta;
+        mp.z += pr.vz * delta;
+        pr.spin += delta * 10;
+        pr.mesh.scale.setScalar(1 + Math.sin(pr.spin) * 0.12);   // 불꽃 일렁임
+        // 플레이어에 맞음
+        if (Math.hypot(p.x - mp.x, p.z - mp.z) < pr.hitR) {
+          takeDamage(pr.dmg, mp.x, mp.z);
+          scene.remove(pr.mesh); disposeObj(pr.mesh); bossProjectiles.splice(i, 1);
+          continue;
+        }
+        // 엄폐물에 맞으면 사라짐 (벽 뒤로 숨으면 막힘)
+        let blocked = false;
+        for (const o of obstacles) {
+          if (mp.x > o.minX && mp.x < o.maxX && mp.z > o.minZ && mp.z < o.maxZ) { blocked = true; break; }
+        }
+        if (blocked || pr.life > 5 || Math.abs(mp.x) > ARENA || Math.abs(mp.z) > ARENA) {
+          scene.remove(pr.mesh); disposeObj(pr.mesh); bossProjectiles.splice(i, 1);
+        }
+      }
+    }
+
+    // ---------- 던지는 무기: 수류탄 / 화염병 ----------
+    const flameTex = (() => {        // 화염병 불꽃 텍스처
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(32, 42, 2, 32, 32, 30);
+      g.addColorStop(0, 'rgba(255,245,170,0.95)');
+      g.addColorStop(0.45, 'rgba(255,140,30,0.85)');
+      g.addColorStop(1, 'rgba(255,50,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(c);
+    })();
+    const _throwDir = new THREE.Vector3();
+
+    // 던질 수 있는 4종: 수류탄/화염병/얼음/섬광 (남은 개수 확인 + 1개 차감)
+    function throwAmmo(type, take) {
+      if (type === 'frag')   { if (grenades   <= 0) return false; if (take) grenades--;   return true; }
+      if (type === 'molotov'){ if (molotovs   <= 0) return false; if (take) molotovs--;   return true; }
+      if (type === 'ice')    { if (iceGrenades<= 0) return false; if (take) iceGrenades--; return true; }
+      if (type === 'flash')  { if (flashbangs <= 0) return false; if (take) flashbangs--; return true; }
+      return false;
+    }
+
+    function throwItem(type) {
+      if (!controls.isLocked || gameOver) return;
+      if (!throwAmmo(type, false)) { beep(120, 0.08, 'square', 0.1); return; }  // 없으면 빈 소리
+      throwAmmo(type, true);
+      updateHUD();
+      camera.getWorldDirection(_throwDir);
+      const pos = controls.getObject().position;
+      let mesh;
+      if (type === 'molotov') {
+        mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.34, 10),
+          new THREE.MeshStandardMaterial({ color: 0x6a4a20, emissive: 0x441500 }));
+      } else {
+        const col = type === 'frag' ? 0x33401f : type === 'ice' ? 0x5ad6ff : 0xeeeeee;
+        const emi = type === 'ice' ? 0x114455 : type === 'flash' ? 0x444444 : 0x000000;
+        mesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10),
+          new THREE.MeshStandardMaterial({ color: col, emissive: emi, metalness: 0.4, roughness: 0.6 }));
+      }
+      mesh.position.copy(pos).addScaledVector(_throwDir, 0.8);
+      mesh.position.y -= 0.2;
+      mesh.castShadow = true;
+      scene.add(mesh);
+      const power = 19;
+      thrownItems.push({
+        mesh, type,
+        vx: _throwDir.x * power, vy: _throwDir.y * power + 4.5, vz: _throwDir.z * power,
+        fuse: 1.4
+      });
+      beep(320, 0.06, 'square', 0.12);
+    }
+
+    function updateThrownItems(delta) {
+      for (let i = thrownItems.length - 1; i >= 0; i--) {
+        const it = thrownItems[i];
+        it.vy -= 22 * delta;
+        const m = it.mesh.position;
+        m.x += it.vx * delta; m.y += it.vy * delta; m.z += it.vz * delta;
+        it.mesh.rotation.x += delta * 8;
+        let landed = false;
+        if (m.y <= 0.2) { m.y = 0.2; landed = true; }
+        for (const o of obstacles) {
+          if (m.x > o.minX && m.x < o.maxX && m.z > o.minZ && m.z < o.maxZ) { landed = true; break; }
+        }
+        if (Math.abs(m.x) > ARENA || Math.abs(m.z) > ARENA) landed = true;
+
+        if (it.type === 'molotov') {   // 화염병: 땅/엄폐물에 닿으면 깨져서 불바다
+          if (landed) {
+            createFire(m.x, m.z);
+            scene.remove(it.mesh); thrownItems.splice(i, 1);
+          }
+          continue;
+        }
+        // 수류탄/얼음/섬광: 퓨즈가 다 되면 터짐 (그 전엔 통통 튐)
+        it.fuse -= delta;
+        if (landed) { it.vx *= 0.4; it.vz *= 0.4; if (it.vy < 0) it.vy = -it.vy * 0.35; }
+        if (it.fuse <= 0) {
+          if (it.type === 'frag')       explode(m.x, m.y + 0.2, m.z, 7, 16);
+          else if (it.type === 'ice')   iceBurst(m.x, m.y + 0.2, m.z);
+          else if (it.type === 'flash') flashBurst(m.x, m.y + 0.2, m.z);
+          scene.remove(it.mesh); thrownItems.splice(i, 1);
+        }
+      }
+    }
+
+    // ❄️ 얼음 수류탄: 파란 폭발 + 범위 좀비 얼림(느려짐)
+    function iceBurst(x, y, z) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x9ae8ff, transparent: true, opacity: 0.8 }));
+      mesh.position.set(x, y, z); scene.add(mesh);
+      const light = new THREE.PointLight(0x66ccff, 5, 18, 2);
+      light.position.set(x, y + 0.5, z); scene.add(light);
+      explosions.push({ mesh, light, life: 0, max: 0.5, radius: 7 });
+      beep(900, 0.25, 'sine', 0.2);
+      const now = clock.getElapsedTime();
+      for (const z2 of zombies) {
+        if (Math.hypot(z2.group.position.x - x, z2.group.position.z - z) < 7) z2.frozenUntil = now + 3.5;
+      }
+    }
+
+    // ⚡ 섬광탄: 하얀 폭발 + 범위 좀비 기절(멈춤)
+    function flashBurst(x, y, z) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 }));
+      mesh.position.set(x, y, z); scene.add(mesh);
+      const light = new THREE.PointLight(0xffffff, 8, 22, 2);
+      light.position.set(x, y + 0.5, z); scene.add(light);
+      explosions.push({ mesh, light, life: 0, max: 0.4, radius: 9 });
+      beep(1200, 0.18, 'sine', 0.18);
+      const now = clock.getElapsedTime();
+      for (const z2 of zombies) {
+        if (Math.hypot(z2.group.position.x - x, z2.group.position.z - z) < 9) z2.stunUntil = now + 2.2;
+      }
+    }
+
+    function explode(x, y, z, radius, dmg, srcWeapon) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffb43a, transparent: true, opacity: 0.95 }));
+      mesh.position.set(x, y, z); scene.add(mesh);
+      const light = new THREE.PointLight(0xffaa44, 6, radius * 3, 2);
+      light.position.set(x, y + 0.5, z); scene.add(light);
+      explosions.push({ mesh, light, life: 0, max: 0.45, radius });
+      beep(60, 0.35, 'square', 0.28);
+      for (const z2 of [...zombies]) {   // 범위 내 좀비에 데미지(가까울수록 큼)
+        const d = Math.hypot(z2.group.position.x - x, z2.group.position.z - z);
+        if (d < radius) {
+          const dealt = Math.max(1, Math.round(dmg * (1 - d / radius * 0.7)));
+          spawnDamageNumber(new THREE.Vector3(z2.group.position.x, 1.5, z2.group.position.z), dealt);
+          applyDamage(z2, dealt, srcWeapon, false, true);   // 폭발: 로켓이면 srcWeapon='rocket'
+        }
+      }
+      const pp = controls.getObject().position;   // 가까우면 화면 흔들림
+      const pd = Math.hypot(pp.x - x, pp.z - z);
+      if (pd < radius * 1.6) shake += 0.5 * (1 - pd / (radius * 1.6));
+    }
+    function updateExplosions(delta) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const ex = explosions[i];
+        ex.life += delta;
+        const t = ex.life / ex.max;
+        ex.mesh.scale.setScalar(0.5 + t * ex.radius);
+        ex.mesh.material.opacity = 0.95 * (1 - t);
+        ex.light.intensity = 6 * (1 - t);
+        if (t >= 1) {
+          scene.remove(ex.mesh); scene.remove(ex.light);
+          ex.mesh.material.dispose(); explosions.splice(i, 1);
+        }
+      }
+    }
+
+    function createFire(x, z) {
+      const group = new THREE.Group();
+      const disk = new THREE.Mesh(new THREE.CircleGeometry(2.3, 24),
+        new THREE.MeshBasicMaterial({ color: 0xff5512, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+      disk.rotation.x = -Math.PI / 2; disk.position.y = 0.06; group.add(disk);
+      const flames = [];
+      for (let k = 0; k < 7; k++) {
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: flameTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        const a = Math.random() * Math.PI * 2, rr = Math.random() * 1.7;
+        s.position.set(Math.cos(a) * rr, 0.5 + Math.random() * 0.5, Math.sin(a) * rr);
+        s.scale.set(1.6, 2.0, 1);
+        group.add(s); flames.push(s);
+      }
+      const light = new THREE.PointLight(0xff6622, 3, 10, 2);
+      light.position.y = 1; group.add(light);
+      group.position.set(x, 0, z); scene.add(group);
+      firePatches.push({ group, flames, light, life: 0, max: 5, radius: 2.3, lastDmg: 0 });
+      beep(110, 0.4, 'sawtooth', 0.16);
+    }
+    function updateFirePatches(delta, now) {
+      for (let i = firePatches.length - 1; i >= 0; i--) {
+        const f = firePatches[i];
+        f.life += delta;
+        const fade = Math.max(0, 1 - f.life / f.max);
+        for (const s of f.flames) {   // 불꽃 깜빡임
+          s.material.opacity = (0.5 + Math.sin(now * 14 + s.position.x * 5) * 0.3) * fade;
+          s.scale.y = 1.7 + Math.sin(now * 12 + s.position.z * 7) * 0.4;
+        }
+        f.light.intensity = (2.5 + Math.sin(now * 18) * 0.8) * fade;
+        if (now - f.lastDmg > 0.3) {   // 0.3초마다 범위 내 좀비에 화상 데미지
+          f.lastDmg = now;
+          const fx = f.group.position.x, fz = f.group.position.z;
+          for (const z of [...zombies]) {
+            if (Math.hypot(z.group.position.x - fx, z.group.position.z - fz) < f.radius) applyDamage(z, 4);
+          }
+        }
+        if (f.life >= f.max) { scene.remove(f.group); firePatches.splice(i, 1); }
+      }
+    }
+
+    // ---------- 🤖 전투 드론 (따라다니며 자동 사격) ----------
+    function makeDrone() {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 14),
+        new THREE.MeshStandardMaterial({ color: 0x335577, metalness: 0.7, roughness: 0.3, emissive: 0x113355, emissiveIntensity: 0.6 }));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.04, 8, 18),
+        new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.8, roughness: 0.3 }));
+      ring.rotation.x = Math.PI / 2;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0x66ffcc }));
+      eye.position.z = -0.2;
+      g.add(body); g.add(ring); g.add(eye);
+      g.traverse(o => { o.castShadow = false; });
+      scene.add(g);
+      return { group: g, lastShot: 0 };
+    }
+    function addDrone() { droneCount++; drones.push(makeDrone()); }
+
+    function spawnTracer(a, b) {   // 드론이 쏠 때 빛줄기
+      const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x88ffdd, transparent: true, opacity: 0.9 }));
+      scene.add(line);
+      tracers.push({ line, life: 0 });
+    }
+    function updateTracers(delta) {
+      for (let i = tracers.length - 1; i >= 0; i--) {
+        const t = tracers[i]; t.life += delta;
+        t.line.material.opacity = Math.max(0, 0.9 * (1 - t.life / 0.12));
+        if (t.life > 0.12) { scene.remove(t.line); t.line.geometry.dispose(); t.line.material.dispose(); tracers.splice(i, 1); }
+      }
+    }
+
+    const _dronePos = new THREE.Vector3();
+    function updateDrones(delta, now, p) {
+      for (let di = 0; di < drones.length; di++) {
+        const d = drones[di];
+        // 플레이어 주위를 빙글빙글 (드론끼리 골고루 퍼지게)
+        const ang = now * 1.2 + di * (Math.PI * 2 / Math.max(1, drones.length));
+        const r = 2.2;
+        d.group.position.set(p.x + Math.cos(ang) * r, 2.4 + Math.sin(now * 2 + di) * 0.12, p.z + Math.sin(ang) * r);
+        _dronePos.copy(d.group.position);
+        // 가장 가까운 좀비 조준
+        let target = null, best = 1e9;
+        for (const z of zombies) {
+          const dd = Math.hypot(z.group.position.x - _dronePos.x, z.group.position.z - _dronePos.z);
+          if (dd < best) { best = dd; target = z; }
+        }
+        if (target) {
+          d.group.lookAt(target.group.position.x, 1.4, target.group.position.z);
+          if (best < 32 && now - d.lastShot > 0.6) {
+            d.lastShot = now;
+            const dmg = 3 + Math.floor(gunPower * 0.5);   // 공격력 강화 일부 반영
+            spawnTracer(_dronePos, new THREE.Vector3(target.group.position.x, 1.4, target.group.position.z));
+            spawnDamageNumber(new THREE.Vector3(target.group.position.x, 1.6, target.group.position.z), dmg);
+            applyDamage(target, dmg);
+            beep(1000, 0.03, 'square', 0.05);
+          }
+        }
+      }
+    }
+
+    // ---------- 🛡️ 포스필드 (내 주변 좀비에 지속 피해) ----------
+    function updateForcefield(delta, now, p) {
+      if (forcefieldLevel <= 0) { if (forcefieldMesh) forcefieldMesh.visible = false; return; }
+      if (!forcefieldMesh) {
+        forcefieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0x55aaff, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+        scene.add(forcefieldMesh);
+      }
+      const radius = 3 + forcefieldLevel * 0.8;
+      forcefieldMesh.visible = true;
+      forcefieldMesh.scale.setScalar(radius);
+      forcefieldMesh.position.set(p.x, 1.4, p.z);
+      forcefieldMesh.material.opacity = 0.12 + Math.sin(now * 4) * 0.04;
+      if (now - ffLastDmg > 0.4) {
+        ffLastDmg = now;
+        const dmg = 2 + forcefieldLevel;
+        for (const z of [...zombies]) {
+          if (Math.hypot(z.group.position.x - p.x, z.group.position.z - p.z) < radius) applyDamage(z, dmg);
+        }
+      }
+    }
+
+    // ---------- ⚙️ 자동 지뢰 (주변에 알아서 깔리고 좀비가 밟으면 터짐) ----------
+    function updateMines(delta, now, p) {
+      if (mineLevel > 0) {
+        mineTimer -= delta;
+        const interval = Math.max(1.2, 3.5 - mineLevel * 0.4);
+        if (mineTimer <= 0 && mines.length < 6 + mineLevel * 2) {
+          mineTimer = interval;
+          const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 5;
+          const mx = Math.max(-ARENA + 2, Math.min(ARENA - 2, p.x + Math.cos(a) * r));
+          const mz = Math.max(-ARENA + 2, Math.min(ARENA - 2, p.z + Math.sin(a) * r));
+          const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.12, 12),
+            new THREE.MeshStandardMaterial({ color: 0x553333, emissive: 0x330000, emissiveIntensity: 0.5 }));
+          mesh.position.set(mx, 0.08, mz); mesh.castShadow = true; scene.add(mesh);
+          mines.push({ mesh, x: mx, z: mz });
+        }
+      }
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const mn = mines[i];
+        mn.mesh.material.emissiveIntensity = 0.4 + Math.sin(now * 8) * 0.3;   // 깜빡깜빡
+        let boom = false;
+        for (const z of zombies) {
+          if (Math.hypot(z.group.position.x - mn.x, z.group.position.z - mn.z) < 1.4) { boom = true; break; }
+        }
+        if (boom) {
+          explode(mn.x, 0.3, mn.z, 5, 12 + mineLevel * 4);
+          scene.remove(mn.mesh); mn.mesh.geometry.dispose(); mn.mesh.material.dispose(); mines.splice(i, 1);
+        }
+      }
+    }
+
+    // ---------- 📦 보급 상자 (위험한 중앙 근처에 등장 → 주워서 보상) ----------
+    function spawnSupplyBox() {
+      const a = Math.random() * Math.PI * 2, r = 5 + Math.random() * 8;   // 중앙 근처 링(위험) — 정중앙 엄폐물은 피함
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const g = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ color: 0xffcc33, emissive: 0x553300, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.5 }));
+      box.position.y = 0.5; box.castShadow = true; g.add(box);
+      // 멀리서도 보이는 빛기둥(위치 표시)
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 14, 10, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+      beam.position.y = 7; g.add(beam);
+      const light = new THREE.PointLight(0xffcc55, 2, 10, 2); light.position.y = 1.5; g.add(light);
+      g.position.set(x, 0, z); scene.add(g);
+      supplyBoxes.push({ group: g, box, beam, x, z, born: clock.getElapsedTime() });
+      showToast('📦 보급 상자 등장! 중앙 근처 — 위험을 감수하고 주워가자', 1.8);
+      beep(880, 0.12, 'triangle', 0.18);
+    }
+    function giveSupply() {
+      const kinds = ['heal', 'grenade', 'ammo', 'power', 'speed'];
+      const k = kinds[Math.floor(Math.random() * kinds.length)];
+      const now = clock.getElapsedTime();
+      if (k === 'heal')         { health = Math.min(maxHealth, health + 40); showToast('📦 체력 회복 +40', 1.3); }
+      else if (k === 'grenade') { grenades = Math.min(9, grenades + 2); showToast('📦 수류탄 +2', 1.3); }
+      else if (k === 'ammo')    { ammo = AMMO_MAX; WEAPONS[equipped].ammo = ammo; reloading = false;
+                                  if (WEAPONS.rocket.owned) rocketAmmo = Math.min(ROCKET_AMMO_CAP, rocketAmmo + 2);
+                                  showToast('📦 탄약 보충!', 1.3); }
+      else if (k === 'power')   { tempPower = 3; tempPowerUntil = now + 12; showToast('📦 임시 공격력 강화! (12초)', 1.5); }
+      else                      { tempSpeed = 0.5; tempSpeedUntil = now + 12; showToast('📦 임시 이동속도 증가! (12초)', 1.5); }
+      beep(1200, 0.12, 'triangle', 0.2); updateHUD();
+    }
+    function updateSupply(delta, now, p) {
+      // 전투 중에만, '보급 부족' 조건이 아니면, 가끔 1개 등장
+      if (now > supplyNextAt && supplyBoxes.length === 0 && now > graceUntil && zombies.length > 0 &&
+          !(waveCondition && waveCondition.key === 'lowammo')) {
+        spawnSupplyBox();
+        supplyNextAt = now + 18 + Math.random() * 10;
+      }
+      for (let i = supplyBoxes.length - 1; i >= 0; i--) {
+        const s = supplyBoxes[i];
+        s.box.rotation.y += delta * 1.5;
+        s.box.position.y = 0.5 + Math.sin(now * 2) * 0.1;
+        s.beam.material.opacity = 0.22 + Math.sin(now * 4) * 0.08;
+        if (Math.hypot(p.x - s.x, p.z - s.z) < 1.6) {            // 주워감
+          giveSupply();
+          scene.remove(s.group); disposeObj(s.group); supplyBoxes.splice(i, 1);
+        } else if (now - s.born > 26) {                          // 오래되면 사라짐
+          scene.remove(s.group); disposeObj(s.group); supplyBoxes.splice(i, 1);
+        }
+      }
+    }
+
+    // ---------- 상점 ----------
+    // max: 최대 레벨(없으면 무한 — 회복/소모품용). 강화류는 캡을 둬서 무한 강화 방지.
+    const SHOP_UPGRADES = [
+      { emoji:'🔫', name:'공격력 강화', desc:'모든 총 데미지 +1', price:120, scale:1.45, count:0, max:10,
+        apply:() => { gunPower += 1; } },
+      { emoji:'❤️', name:'최대 체력', desc:'최대 체력 +25 (가득 회복)', price:110, scale:1.45, count:0, max:8,
+        apply:() => { maxHealth += 25; health = maxHealth; } },
+      { emoji:'🏃', name:'스피드 업', desc:'이동 속도 +12%', price:150, scale:1.6, count:0, max:5,
+        apply:() => { moveBoost += 0.12; } },
+      { emoji:'🔋', name:'탄창 증가', desc:'모든 총 최대 총알 +5', price:120, scale:1.5, count:0, max:6,
+        apply:() => { magBonus += 5; if (!WEAPONS[equipped].usesReserve) { AMMO_MAX = WEAPONS[equipped].mag + magBonus; ammo = AMMO_MAX; WEAPONS[equipped].ammo = ammo; } } },
+      { emoji:'⚡', name:'빠른 재장전', desc:'재장전 시간 15% 감소', price:140, scale:1.5, count:0, max:5,
+        apply:() => { reloadMult *= 0.85; } },
+      { emoji:'💥', name:'관통탄', desc:'총알이 좀비 1마리 더 관통', price:170, scale:1.6, count:0, max:4,
+        apply:() => { pierceBonus += 1; } },
+      { emoji:'🎯', name:'크리티컬', desc:'치명타 확률 +12% (데미지 2배)', price:160, scale:1.5, count:0, max:5,
+        apply:() => { critChance = Math.min(0.6, critChance + 0.12); } },
+      { emoji:'🤖', name:'전투 드론', desc:'따라다니며 좀비 자동 공격(영구)', price:550, scale:1.9, count:0, max:3,
+        apply:() => { addDrone(); } },
+      { emoji:'🛡️', name:'포스필드', desc:'내 주변 좀비에 지속 피해(강화)', price:340, scale:1.6, count:0, max:5,
+        apply:() => { forcefieldLevel += 1; } },
+      { emoji:'⚙️', name:'자동 지뢰', desc:'주변에 지뢰 자동 설치(강화)', price:280, scale:1.6, count:0, max:5,
+        apply:() => { mineLevel += 1; } },
+      { emoji:'💊', name:'체력 회복', desc:'체력 가득 회복', price:130, scale:1.0, count:0,
+        apply:() => { health = maxHealth; } },
+      { emoji:'💣', name:'수류탄 보급', desc:'수류탄 +3', price:90, scale:1.2, count:0,
+        apply:() => { grenades = Math.min(9, grenades + 3); } },
+      { emoji:'🔥', name:'화염병 보급', desc:'화염병 +2', price:110, scale:1.2, count:0,
+        apply:() => { molotovs = Math.min(6, molotovs + 2); } },
+      { emoji:'🚀', name:'로켓탄 보급', desc:'로켓 예비탄 +2', price:160, scale:1.2, count:0,
+        apply:() => { rocketAmmo = Math.min(ROCKET_AMMO_CAP, rocketAmmo + 2); } },
+      { emoji:'❄️', name:'얼음 수류탄', desc:'얼음 수류탄 +2 (좀비 얼림)', price:90, scale:1.2, count:0,
+        apply:() => { iceGrenades = Math.min(9, iceGrenades + 2); } },
+      { emoji:'⚡', name:'섬광탄', desc:'섬광탄 +2 (좀비 기절)', price:90, scale:1.2, count:0,
+        apply:() => { flashbangs = Math.min(9, flashbangs + 2); } },
+    ];
+    function upgMaxed(u) { return u.max && u.count >= u.max; }
+
+    const shopScreen = document.getElementById('shopScreen');
+
+    function upgPrice(u) { return Math.round(u.price * Math.pow(u.scale, u.count)); }
+
+    // 무기 카드 1개 만들기 (B 무기상점에서 사용) — 사거나 장착하면 afterBuy() 호출
+    function weaponCardEl(key, afterBuy) {
+      const W = WEAPONS[key];
+      const card = document.createElement('div');
+      card.className = 'shop-card';
+      let btnHtml;
+      if (!W.owned) {
+        const can = coins >= W.price;
+        btnHtml = `<button class="${can ? '' : 'cant'}">💰 ${W.price} 구매</button>`;
+      } else if (equipped === key) {
+        btnHtml = `<button class="equipped" disabled>✅ 장착중</button>`;
+      } else {
+        btnHtml = `<button class="equip">장착하기</button>`;
+      }
+      card.innerHTML =
+        (W.thumb ? `<img class="gunimg" src="${W.thumb}" alt="${W.name}">` : `<div class="emoji">🔫</div>`) +
+        `<div class="rname">${W.name}</div>` +
+        `<div class="rdesc">${WEAPON_ROLE[key] || ''}<br>데미지 ${W.dmg} · ${W.auto ? '연사' : '단발'} · 탄창 ${W.mag}${W.pellets > 1 ? ' · ' + W.pellets + '연발' : ''}</div>` +
+        btnHtml;
+      card.querySelector('button').onclick = () => {
+        if (!W.owned) {
+          if (coins >= W.price) {
+            coins -= W.price; W.owned = true;
+            if (key === 'rocket') rocketAmmo = Math.max(rocketAmmo, 3);   // 로켓 첫 구매 시 예비탄 지급
+            equip(key); beep(880, 0.1); updateHUD(); afterBuy();
+          }
+          else beep(120, 0.1, 'square', 0.1);
+        } else if (equipped !== key) {
+          equip(key); afterBuy();
+        }
+      };
+      return card;
+    }
+
+    // 🔫 B키 무기 상점 (언제든 총 사고 바꾸기)
+    function renderWeaponShop() {
+      document.getElementById('wshopCoins').textContent = coins;
+      const row = document.getElementById('wshopWeapons');
+      row.innerHTML = '';
+      for (const key of WEAPON_ORDER) row.appendChild(weaponCardEl(key, renderWeaponShop));
+    }
+
+    // 🛒 웨이브 클리어 상점 (업그레이드 전용 — 무기는 B키 상점)
+    function renderShop() {
+      document.getElementById('shopCoins').textContent = coins;
+      const uRow = document.getElementById('shopUpgrades');
+      uRow.innerHTML = '';
+      for (const u of SHOP_UPGRADES) {
+        const pr = upgPrice(u);
+        const maxed = upgMaxed(u);
+        const can = !maxed && coins >= pr;
+        const card = document.createElement('div');
+        card.className = 'shop-card';
+        // 레벨 표시: 강화류는 'Lv. x / max', 소모품은 '구매 x회'
+        const lvlText = u.max ? `Lv. ${u.count} / ${u.max}` : (u.count > 0 ? `구매 ${u.count}회` : '');
+        const btnHtml = maxed
+          ? `<button class="max" disabled>✨ 최대 레벨</button>`
+          : `<button class="${can ? '' : 'cant'}">💰 ${pr} 구매</button>`;
+        card.innerHTML =
+          `<div class="emoji">${u.emoji}</div>` +
+          `<div class="rname">${u.name}</div>` +
+          `<div class="rdesc">${u.desc}</div>` +
+          (lvlText ? `<div class="lvl">${lvlText}</div>` : ``) +
+          btnHtml;
+        card.querySelector('button').onclick = () => {
+          if (upgMaxed(u)) return;
+          const price = upgPrice(u);
+          if (coins >= price) { coins -= price; u.apply(); u.count++; beep(880, 0.1); updateHUD(); renderShop(); }
+          else beep(120, 0.1, 'square', 0.1);
+        };
+        uRow.appendChild(card);
+      }
+    }
+
+    function openShop() {
+      if (gameOver) return;
+      inShop = true;
+      firing = false;
+      controls.unlock();
+      renderShop();
+      shopScreen.classList.remove('hidden');
+      beep(660, 0.12, 'triangle');
+    }
+
+    document.getElementById('nextWaveBtn').onclick = () => {
+      shopScreen.classList.add('hidden');
+      inShop = false;
+      controls.lock();
+      startWave();
+    };
+
+    // ---------- 🔫 B키 무기 상점 열고 닫기 ----------
+    const weaponShopScreen = document.getElementById('weaponShopScreen');
+    function openWeaponShop() {
+      if (gameOver || inShop || inWeaponShop) return;
+      inWeaponShop = true;
+      firing = false;
+      if (clock.getElapsedTime() < graceUntil) graceFrozenAt = clock.getElapsedTime();  // 준비시간 멈춤
+      controls.unlock();
+      renderWeaponShop();
+      weaponShopScreen.classList.remove('hidden');
+      beep(660, 0.1, 'triangle');
+    }
+    function closeWeaponShop() {
+      if (!inWeaponShop) return;
+      weaponShopScreen.classList.add('hidden');
+      inWeaponShop = false;
+      controls.lock();
+    }
+    document.getElementById('wshopCloseBtn').onclick = closeWeaponShop;
+
+    // ---------- 무기 장착 ----------
+    function equip(key) {
+      // 들고 있던 총의 남은 탄약을 저장 (이미 든 적 있는 총만)
+      const prev = WEAPONS[equipped];
+      if (prev && prev.ammo !== undefined) prev.ammo = ammo;
+      if (key !== 'knife') prevGun = key;   // 마지막으로 든 '총' 기억(휠/Q로 칼 들었다 돌아올 때 사용)
+      else { knifeAnim.state = 'Knife_Equip'; knifeAnim.t = 0; knifeAnim.hitDone = false; }  // 칼 꺼내기 모션 시작
+      equipped = key;
+      const W = WEAPONS[key];
+      AMMO_MAX = W.mag + (W.usesReserve ? 0 : magBonus);   // 로켓은 탄창증가 영향 X(항상 1발)
+      if (W.ammo === undefined) W.ammo = AMMO_MAX;   // 처음 들면 가득
+      ammo = Math.min(W.ammo, AMMO_MAX);             // 무기별 남은 탄약 그대로 (자동 장전 X)
+      W.ammo = ammo;
+      reloading = false;
+      restyleGun();
+      updateHUD();
+      beep(520, 0.06, 'sine');
+    }
+
+    // ---------- 재장전 ----------
+    function reload() {
+      const W = WEAPONS[equipped];
+      if (reloading || ammo === AMMO_MAX || gameOver) return;
+      if (W.usesReserve && rocketAmmo <= 0) { beep(120, 0.08, 'square', 0.1); return; }  // 로켓: 예비탄 없으면 장전 불가
+      reloading = true;
+      const wKey = equipped;                  // 어떤 총을 장전하는지 기억
+      // 권총/미니건 숙련도: 장전 속도 증가(레벨당 -6%)
+      const reloadMast = (equipped === 'pistol' || equipped === 'minigun') ? (1 - 0.06 * masteryLevel(equipped)) : 1;
+      const dur = W.reload * reloadMult * reloadMast;
+      reloadStart = clock.getElapsedTime();   // 장전 모션 시작
+      reloadDur = dur;
+      beep(200, 0.1, 'sine');
+      document.getElementById('ammoNow').textContent = '...';
+      setTimeout(() => {
+        if (equipped !== wKey || gameOver) { reloading = false; return; }   // 그새 무기 바꿨거나 죽었으면 무시
+        if (WEAPONS[wKey].usesReserve) {
+          if (rocketAmmo <= 0) { reloading = false; updateHUD(); return; }
+          rocketAmmo--;                       // 예비탄 1발 소모해서 장전
+        }
+        ammo = AMMO_MAX;
+        WEAPONS[wKey].ammo = ammo;
+        reloading = false;
+        updateHUD();
+      }, dur * 1000);
+    }
+
+    // ---------- 피 맞기 / 게임오버 ----------
+    const hurt = document.getElementById('hurt');
+    function takeDamage(dmg, srcX, srcZ) {
+      if (gameOver) return;                       // 죽은 뒤엔 더 이상 피해 처리 안 함
+      if (ultActive()) { beep(660, 0.05, 'triangle', 0.08); return; }   // ⚡ 오버드라이브 중엔 무적
+      health -= dmg;
+      hurt.style.opacity = 1;
+      setTimeout(() => { hurt.style.opacity = 0; }, 150);
+      if (srcX !== undefined) flashDamageDir(srcX, srcZ);   // 어느 방향에서 맞았는지 표시
+      beep(150, 0.15, 'square', 0.2);
+      updateHUD();
+      if (health <= 0) endGame('💀 체력이 모두 소진되었습니다');
+    }
+
+    const REC_TIPS = {
+      pistol:  '권총으로 잘 버텼네요. 다음엔 소총·SMG로 화력을 올려보세요.',
+      rifle:   '소총 위주였어요. 보스전을 대비해 저격총 숙련도를 키워보세요.',
+      smg:     '근접 연사형이네요. 원거리용 저격총을 함께 키워보세요.',
+      shotgun: '샷건 근접형! 멀리서 오는 적엔 소총/저격을 더해보세요.',
+      sniper:  '저격 중심이었어요. 몰릴 때를 대비해 SMG/샷건도 키워보세요.',
+      minigun: '미니건 화력형! 이동이 느리니 이동속도 특성을 노려보세요.',
+      rocket:  '폭발 전문가! 아머 좀비 상대로 계속 강력합니다.',
+    };
+    function endGame(reason) {
+      gameOver = true;
+      firing = false;
+      bossbarEl.classList.remove('on', 'weak');
+      controls.unlock();
+      // 최고 기록 갱신 + 영구 저장
+      const newWave = wave > records.bestWave, newScore = score > records.bestScore;
+      records.bestWave = Math.max(records.bestWave, wave);
+      records.bestScore = Math.max(records.bestScore, score);
+      try { localStorage.setItem('zombieFpsRecords', JSON.stringify(records)); } catch (e) {}
+      saveMastery();
+      // 이번 판 가장 많이 쓴 무기(발사 수 기준)
+      let topW = 'pistol', topShots = -1;
+      for (const k in WEAPONS) { const s = runWeaponShots[k] || 0; if (s > topShots) { topShots = s; topW = k; } }
+      document.getElementById('finalWave').textContent = wave + (newWave ? ' 🏆신기록' : '');
+      document.getElementById('finalKills').textContent = kills;
+      document.getElementById('finalScore').textContent = score + (newScore ? ' 🏆' : '');
+      document.getElementById('finalStats').innerHTML =
+        (reason ? `<span style="color:#ff8a8a;font-size:19px">${reason}</span><br>` : '') +
+        `🏅 최고 웨이브 <b>${records.bestWave}</b> · 최고 점수 <b>${records.bestScore}</b><br>` +
+        `🔫 가장 많이 쓴 무기: <b>${WEAPONS[topW].name}</b> (숙련도 ★${masteryLevel(topW)})<br>` +
+        `💥 헤드샷 ${runHeadshots} · 🔥 최고 콤보 ${runBestCombo} · 👹 보스 처치 ${runBossKills}<br>` +
+        `🎯 완료 미션 ${runMissionsDone} · 💰 이번 판 획득 코인 ${runCoinsEarned}`;
+      document.getElementById('finalRec').textContent = '💡 ' + (REC_TIPS[topW] || '다양한 무기를 키워 숙련도를 올려보세요.');
+      overScreen.classList.remove('hidden');
+    }
+
+    // ---------- 움직임 계산용 ----------
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    const clock = new THREE.Clock();
+
+    function update(delta) {
+      const now = clock.getElapsedTime();
+      fadeTimedUI(now);
+      if (tempPowerUntil && now > tempPowerUntil) { tempPower = 0; tempPowerUntil = 0; }   // 임시버프 만료
+      if (tempSpeedUntil && now > tempSpeedUntil) { tempSpeed = 0; tempSpeedUntil = 0; }
+
+      // --- 총 반동 회복 (원래 자리로 부드럽게) + 불꽃 끄기 + 조준점 줄이기 ---
+      const back = Math.min(1, delta * 18);
+      recoilZ += (0 - recoilZ) * back;
+      recoilPitch += (0 - recoilPitch) * back;
+      if (muzzleFlash && muzzleFlash.visible && now > muzzleOffAt) muzzleFlash.visible = false;
+      muzzleLight.intensity *= 0.75;   // 총구 불빛 빠르게 사그라듦
+      bloom *= 0.85;
+      document.getElementById('crosshair').style.transform =
+        `translate(-50%, -50%) scale(${1 + bloom * 3})`;
+
+      // --- 연사: 마우스 누르고 있고 연사 무기면 간격마다 자동 발사 ---
+      if (firing && WEAPONS[equipped].auto && now - lastShot >= WEAPONS[equipped].fireDelay) {
+        doShoot();
+      }
+
+      // --- 플레이어 이동 (WASD 이동 · Shift=달리기 · Space=점프) ---
+      const moving = keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD'];
+      const sprint = (!!keys['ShiftLeft'] || !!keys['ShiftRight']) && moving;
+
+      velocity.x -= velocity.x * 10 * delta;
+      velocity.z -= velocity.z * 10 * delta;
+
+      direction.z = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
+      direction.x = (keys['KeyD'] ? 1 : 0) - (keys['KeyA'] ? 1 : 0);
+      direction.normalize();
+
+      const baseSpeed = sprint ? 74 : 44;
+      const speed = baseSpeed * (moveBoost + tempSpeed) * (WEAPONS[equipped].moveMul || 1) * (1 - 0.35 * adsAmount) * (ultActive() ? 1.35 : 1); // 정조준/무거운 총이면 느려짐, 오버드라이브면 빨라짐
+      if (keys['KeyW'] || keys['KeyS']) velocity.z -= direction.z * speed * delta;
+      if (keys['KeyA'] || keys['KeyD']) velocity.x -= direction.x * speed * delta;
+
+      controls.moveRight(-velocity.x * delta);
+      controls.moveForward(-velocity.z * delta);
+
+      const p = controls.getObject().position;
+      const lim = ARENA - 2;
+      p.x = Math.max(-lim, Math.min(lim, p.x));
+      p.z = Math.max(-lim, Math.min(lim, p.z));
+
+      // --- 엄폐물 충돌(통과 못 하게 밀어내기) ---
+      const pr = 0.5;
+      for (const o of obstacles) {
+        if (p.x > o.minX - pr && p.x < o.maxX + pr && p.z > o.minZ - pr && p.z < o.maxZ + pr) {
+          const penX = (p.x < (o.minX + o.maxX) / 2) ? (o.minX - pr) - p.x : (o.maxX + pr) - p.x;
+          const penZ = (p.z < (o.minZ + o.maxZ) / 2) ? (o.minZ - pr) - p.z : (o.maxZ + pr) - p.z;
+          if (Math.abs(penX) < Math.abs(penZ)) p.x += penX; else p.z += penZ;
+        }
+      }
+
+      // --- 점프 / 중력 ---
+      if (onGround) {
+        p.y = 1.7;
+      } else {
+        velocityY -= 25 * delta;
+        p.y += velocityY * delta;
+        if (p.y <= 1.7) {
+          landDip = Math.min(0.16, Math.abs(velocityY) * 0.014); // 착지 충격(카메라 움푹)
+          p.y = 1.7; velocityY = 0; onGround = true;
+        }
+      }
+
+      // --- 좀비 이동 ---
+      const inGrace = now < graceUntil;
+      const msg = document.getElementById('msg');
+      if (inGrace) {
+        msg.classList.remove('hidden');
+        const sec = Math.ceil(graceUntil - now);
+        msg.innerHTML = `🌊 WAVE ${wave}` +
+          (waveCondition ? `<div style="font-size:22px;color:#ff9a3c">${waveCondition.label}</div>` : '') +
+          `<div style="font-size:28px;opacity:.92">준비... ${sec}　(B: 무기 상점)</div>`;
+      } else {
+        msg.classList.add('hidden');
+      }
+
+      for (const z of zombies) {
+        const zp = z.group.position;
+        // 플레이어까지의 거리(밀어내기 등에 항상 사용)
+        const pdx = p.x - zp.x, pdz = p.z - zp.z;
+        const pdist = Math.hypot(pdx, pdz);
+        // 타깃 결정: 기본은 플레이어. 발전기 방어 웨이브면 더 가까운 쪽을 노림(보스는 항상 플레이어)
+        let dx = pdx, dz = pdz, dist = pdist, targetGen = false;
+        if (!z.isBoss && generator && generator.active && !generator.dead) {
+          const gdx = generator.x - zp.x, gdz = generator.z - zp.z;
+          const gdist = Math.hypot(gdx, gdz);
+          if (gdist < pdist) { dx = gdx; dz = gdz; dist = gdist; targetGen = true; }
+        }
+
+        // 보스는 덩치가 커서 공격/밀어내기 범위도 큼. 발전기는 덩치가 있어 조금 넓게
+        const atkR  = z.isBoss ? 2.8 : (targetGen ? 2.4 : 1.7);
+        const pushR = z.isBoss ? 2.6 : 1.4;
+
+        if (inGrace) {
+          z.group.position.y = Math.sin(now * 6 + zp.x) * 0.08;
+          continue;
+        }
+
+        // 상태이상: 섬광=완전정지, 얼음=느려짐
+        let spMul = 1;
+        if (z.stunUntil && now < z.stunUntil) spMul = 0;
+        else if (z.frozenUntil && now < z.frozenUntil) spMul = 0.35;
+
+        // ===== 보스 전용: 돌진 진행 / 공격 준비(텔레그래프) / 약점 시간 =====
+        if (z.isBoss) {
+          if (spMul <= 0) {   // 기절·빙결되면 준비/돌진/경고 모두 취소
+            if (z.charging) { z.charging = false; removeDashWarn(z); clearBossGlow(z); }
+            z.dashing = false;
+          }
+          if (z._weakGlow && (!z.weakUntil || now >= z.weakUntil)) { clearBossGlow(z); z._weakGlow = false; }
+
+          if (z.dashing) {   // 돌진: 직선으로 밀고 나감
+            zp.x += z.dashVX * delta;
+            zp.z += z.dashVZ * delta;
+            z.group.rotation.y = Math.atan2(z.dashVX, z.dashVZ);
+            const cd = Math.hypot(p.x - zp.x, p.z - zp.z);
+            if (!z.dashHit && cd < 2.8) {            // 들이받음 + 넉백
+              z.dashHit = true;
+              takeDamage(30, zp.x, zp.z);
+              const nl = Math.max(0.1, cd);
+              p.x += (p.x - zp.x) / nl * 3.2; p.z += (p.z - zp.z) / nl * 3.2;
+            }
+            if (now >= z.dashUntil || Math.abs(zp.x) > ARENA - 2 || Math.abs(zp.z) > ARENA - 2) {
+              zp.x = Math.max(-ARENA + 2, Math.min(ARENA - 2, zp.x));
+              zp.z = Math.max(-ARENA + 2, Math.min(ARENA - 2, zp.z));
+              z.dashing = false;
+              z.weakUntil = now + 2.2;              // 돌진 후 약점 시간
+            }
+          } else if (spMul > 0) {
+            updateBossCombat(z, p, now, dist);
+          }
+        }
+
+        const weakNow = z.isBoss && z.weakUntil && now < z.weakUntil;
+        if (z.dashing) {
+          // 위(보스 블록)에서 이미 이동 처리됨
+        } else if (weakNow) {
+          // 약점: 제자리에서 하늘색으로 빛남 (여기 헤드샷!)
+          z.group.rotation.y = Math.atan2(dx, dz);
+          z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0x66ccff); });
+          z._weakGlow = true;
+        } else if (z.charging) {
+          z.group.rotation.y = Math.atan2(dx, dz);   // 공격 준비 중엔 제자리에서 노려봄
+        } else if (dist > atkR) {
+          if (z.trait === 'spitter') {               // 스피터: 붙으면 후퇴 / 멀면 접근 / 적당하면 견제
+            if (dist < 7) { zp.x -= (dx / dist) * z.speed * spMul * delta; zp.z -= (dz / dist) * z.speed * spMul * delta; }
+            else if (dist > 12) { zp.x += (dx / dist) * z.speed * spMul * delta; zp.z += (dz / dist) * z.speed * spMul * delta; }
+            z.group.rotation.y = Math.atan2(dx, dz);
+          } else {
+            zp.x += (dx / dist) * z.speed * spMul * delta;
+            zp.z += (dz / dist) * z.speed * spMul * delta;
+            z.group.rotation.y = Math.atan2(dx, dz);
+          }
+        } else {
+          z.group.rotation.y = Math.atan2(dx, dz);
+          if (spMul > 0 && now - z.lastHit > 1) {   // 기절 중엔 못 때림
+            z.lastHit = now;
+            if (targetGen) damageGenerator(z.isBoss ? 18 : 5);   // 발전기 공격
+            else takeDamage(z.isBoss ? 24 : 6, zp.x, zp.z);      // 플레이어 공격
+          }
+        }
+
+        // 스피터: 거리 두고 산성 침 발사 (기절/빙결 중엔 안 함)
+        if (z.trait === 'spitter' && spMul > 0 && now > z.nextSpit && dist < 28 && dist > 3) {
+          spitterAttack(z, p);
+          z.nextSpit = now + 2.4 + Math.random() * 1.5;
+        }
+
+        // 좀비도 엄폐물을 통과 못 함 — 막히면 옆으로 밀려 돌아감(간단 회피)
+        if (!z.dashing) {
+          for (const o of obstacles) {
+            if (zp.x > o.minX - 0.4 && zp.x < o.maxX + 0.4 && zp.z > o.minZ - 0.4 && zp.z < o.maxZ + 0.4) {
+              const penX = (zp.x < (o.minX + o.maxX) / 2) ? (o.minX - 0.4) - zp.x : (o.maxX + 0.4) - zp.x;
+              const penZ = (zp.z < (o.minZ + o.maxZ) / 2) ? (o.minZ - 0.4) - zp.z : (o.maxZ + 0.4) - zp.z;
+              if (Math.abs(penX) < Math.abs(penZ)) zp.x += penX; else zp.z += penZ;
+            }
+          }
+        }
+
+        // 얼어붙으면 파랗게 표시 (풀리면 원래대로)
+        if (z.frozenUntil && now < z.frozenUntil) {
+          z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0x2a6bd0); });
+          z._frostOn = true;
+        } else if (z._frostOn) {
+          z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0x000000); });
+          z._frostOn = false;
+        }
+
+        // 플레이어가 좀비 몸 안으로 파고드는 것 막기 (밀어내기 — 항상 플레이어 기준)
+        if (pdist < pushR && pdist > 0.0001) {
+          p.x += (pdx / pdist) * (pushR - pdist);
+          p.z += (pdz / pdist) * (pushR - pdist);
+        }
+
+        // 걷는 모션: 위아래 + 좌우로 기우뚱 + 팔 흔들흔들
+        const ph = zp.x;
+        z.group.position.y = Math.abs(Math.sin(now * 5 + ph)) * 0.09;
+        z.group.rotation.z = Math.sin(now * 2.5 + ph) * 0.06;
+        if (z.armL) {
+          if (z.charging) {
+            // 공격 준비: 두 팔 번쩍 들고 부들부들 + 붉게 달아오름 (피하라는 신호)
+            const tCh = Math.min(1, (now - z.chargeStart) / 0.7);
+            const sh = Math.sin(now * 38) * 0.14 * tCh;
+            z.armL.rotation.x = -2.3 + sh;
+            z.armR.rotation.x = -2.3 - sh;
+            z.group.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(0xff0000); });
+          } else {
+            z.armL.rotation.x = Math.sin(now * 5 + ph) * 0.3;
+            z.armR.rotation.x = -Math.sin(now * 5 + ph) * 0.3;
+            if (z.legL) { z.legL.rotation.x = -Math.sin(now * 5 + ph) * 0.38; z.legR.rotation.x = Math.sin(now * 5 + ph) * 0.38; }
+          }
+        }
+
+        // 체력바 시야 가림: 벽/엄폐물에 가리면 안 보이게
+        if (z.hbSprite) {
+          _vHead.set(zp.x, z.isBoss ? 3.4 : 1.9, zp.z);
+          _vDir.copy(_vHead).sub(p);
+          const hd = _vDir.length();
+          _vDir.normalize();
+          losRay.set(p, _vDir);
+          losRay.far = hd - 0.8;
+          // 너무 멀면 숨김(렌더 부담↓) + 벽/엄폐물에 가리면 숨김
+          z.hbSprite.visible = dist < 38 && !(hd > 1.5 && losRay.intersectObjects(colliders, false).length > 0);
+        }
+      }
+
+      // 좀비끼리 너무 겹치지 않게 살짝 밀어내기 (가볍게 — 서로 통과해 뭉치는 것 방지)
+      for (let i = 0; i < zombies.length; i++) {
+        const a = zombies[i]; if (a.dashing) continue;
+        const ap = a.group.position;
+        for (let j = i + 1; j < zombies.length; j++) {
+          const b = zombies[j]; if (b.dashing) continue;
+          const bp = b.group.position;
+          const ddx = bp.x - ap.x, ddz = bp.z - ap.z;
+          const dd = Math.hypot(ddx, ddz);
+          const minD = (a.isBoss || b.isBoss) ? 2.4 : 1.1;
+          if (dd > 0.001 && dd < minD) {
+            const push = (minD - dd) / 2, ux = ddx / dd, uz = ddz / dd;
+            ap.x -= ux * push; ap.z -= uz * push;
+            bp.x += ux * push; bp.z += uz * push;
+          }
+        }
+      }
+
+      updateBossBar();   // 화면 위 보스 체력바
+      updateUlt();       // ⚡ 오버드라이브 종료 체크
+
+      // --- 데미지 숫자 / 쓰러지는 좀비 / 보스 투사체 / 던진 무기 업데이트 ---
+      updateFloaters(delta);
+      updateDying(delta);
+      updateBossProjectiles(delta, p);
+      updateShockwaves(delta);
+      updateThrownItems(delta);
+      updateExplosions(delta);
+      updateFirePatches(delta, now);
+      updateDrones(delta, now, p);
+      updateForcefield(delta, now, p);
+      updateMines(delta, now, p);
+      updateTracers(delta);
+      updateSupply(delta, now, p);   // 📦 보급 상자
+
+      // --- 웨이브 목표(미션) 처리 ---
+      updateGenerator(delta, now);         // 🔋 발전기 연출
+      checkObjectiveProgress(now, p);      // 상자 회수 / 스위치 작동 / 생존 추가 스폰
+      updateObjHud(now);                   // 화면 위 목표 표시 갱신
+      checkObjective(now);                 // 목표 달성 시 웨이브 완료
+
+      // --- 총 모션 합치기 (걷기 흔들 + 점프 + 장전 모션 + 반동) ---
+      applyGunMotion(delta, now);
+    }
+
+    // 총을 매 순간 알맞은 자세로 놓기 (여러 모션을 한 번에 합침)
+    function applyGunMotion(delta, now) {
+      const moving = keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD'];
+      const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) && moving;
+
+      // 정조준(ADS) 진행도 부드럽게 (Lerp — 갑자기 안 튐). 🔪 칼은 조준 안 함
+      const adsTarget = (aiming && !reloading && !WEAPONS[equipped].melee) ? 1 : 0;
+      adsAmount += (adsTarget - adsAmount) * Math.min(1, delta * 12);
+      // 조준 중엔 설정한 '조준 감도'만큼 마우스 느리게 (정밀 조준)
+      controls.pointerSpeed = settings.sens * 0.61 * (1 - (1 - settings.adsSens) * adsAmount);
+      // 줌: 저격총은 강배율(망원), 나머지는 평소 → 55로 부드럽게
+      const Wq = WEAPONS[equipped];
+      let aimFov;
+      if (Wq.adsZoom && Wq.adsZoom >= 2) {                    // 저격총 등 강배율
+        const halfBase = (settings.fov * Math.PI / 180) / 2;
+        aimFov = 2 * Math.atan(Math.tan(halfBase) / Wq.adsZoom) * 180 / Math.PI;
+      } else {
+        aimFov = 55;                                          // 일반 총: 살짝만 확대
+      }
+      camera.fov = settings.fov + (aimFov - settings.fov) * adsAmount;
+      camera.updateProjectionMatrix();
+      // 저격총 정조준 시: 총 숨기고 스코프 오버레이 표시 (진짜 FPS 저격 느낌)
+      const scopeOn = equipped === 'sniper' && adsAmount > 0.6;
+      scopeEl.classList.toggle('on', scopeOn);
+      gunHolder.visible = !scopeOn;
+      chEl.style.opacity = scopeOn ? '0' : '1';
+
+      // 마우스 따라 출렁(무게감): 목표는 0으로 돌아가고 현재값은 목표로 따라감
+      swayTX += (0 - swayTX) * Math.min(1, delta * 8);
+      swayTY += (0 - swayTY) * Math.min(1, delta * 8);
+      swayX += (swayTX - swayX) * Math.min(1, delta * 12);
+      swayY += (swayTY - swayY) * Math.min(1, delta * 12);
+
+      // 좌우 이동 시 총 기울임(린)
+      const strafe = (keys['KeyD'] ? 1 : 0) - (keys['KeyA'] ? 1 : 0);
+      leanRoll += ((-strafe * 0.05) - leanRoll) * Math.min(1, delta * 8);
+
+      // 걷기 흔들림 (정조준 중엔 약하게)
+      const motionMul = 1 - adsAmount * 0.85;
+      let bx = 0, by = 0;
+      if (moving && onGround) {
+        bobTime += delta * (sprint ? 16 : 10);
+        bx = Math.cos(bobTime) * 0.014;
+        by = Math.abs(Math.sin(bobTime)) * 0.016;
+      } else {
+        idleTime += delta;
+        by = Math.sin(idleTime * 1.6) * 0.005;
+        bx = Math.cos(idleTime * 1.1) * 0.004;
+      }
+      bx *= motionMul; by *= motionMul;
+
+      // 공중에 떠 있으면 총이 살짝 아래로
+      const airY = onGround ? 0 : -0.03;
+
+      // 장전 모션: 총을 내렸다가 기울이고, 탄창을 빼서 새로 끼움
+      let rY = 0, rPitch = 0, rRoll = 0;
+      const model = gunModels[equipped];
+      const mag = model.userData.mag;
+      if (reloading) {
+        const t = Math.min(1, (now - reloadStart) / reloadDur);
+        const dip = Math.sin(t * Math.PI); // 0 → 1 → 0
+        rY = -0.16 * dip;
+        rPitch = 0.6 * dip;
+        rRoll = 0.5 * dip;
+        // 탄창 빼고 새로 끼우는 모션 (아래로 빠졌다 다시 올라옴)
+        if (mag) {
+          const out = t < 0.45 ? (t / 0.45) : (1 - (t - 0.45) / 0.55);
+          mag.position.y = model.userData.magBaseY - out * 0.42;
+          mag.visible = (t < 0.42 || t > 0.55);  // 잠깐 사라졌다(교체) 다시 보임
+        }
+      } else if (mag) {
+        mag.position.y = model.userData.magBaseY;
+        mag.visible = true;
+      }
+
+      // ADS: 총의 조준기 중심(AimPart)을 화면 정중앙(카메라 -z축)에 정확히 맞춘다.
+      // gunHolder를 옮겨 AimPart가 (0, 0, -거리)에 오도록 위치를 역산 → 가늠자가 십자선과 겹침.
+      const AIM = AIM_OFFSETS[equipped] || { x: 0, y: 0.12, z: -0.05 };
+      const adsDepth = 0.62;                               // 조준 시 가늠자까지의 거리(앞으로)
+      const hipX = 0.32, hipY = -0.3, hipZ = GUN_REST_Z;   // 평소: 오른쪽 아래
+      const aimX = -AIM.x;                                 // 가늠자를 가로 중앙(x=0)으로
+      const aimY = -AIM.y;                                 // 가늠자를 세로 중앙(y=0)으로 → 총몸은 그 아래
+      const aimZ = -adsDepth - AIM.z;                      // 가늠자를 화면 앞쪽 중앙으로
+      const baseX = hipX + (aimX - hipX) * adsAmount;      // 부드럽게 Lerp(켤 때/끌 때 모두)
+      const baseY = hipY + (aimY - hipY) * adsAmount;
+      const baseZ = hipZ + (aimZ - hipZ) * adsAmount;
+
+      gunHolder.position.set(
+        baseX + bx + swayX * 0.3 * motionMul,
+        baseY + by + airY + rY,
+        baseZ + recoilZ
+      );
+      gunHolder.rotation.set(
+        recoilPitch + rPitch + swayY * motionMul,
+        rRoll * 0.4 + swayX * motionMul,
+        rRoll + leanRoll * motionMul
+      );
+
+      // 🔪 전술 나이프: 상태머신으로 자세 결정. 위에서 정한 총 자세를 덮어쓴다.
+      if (equipped === 'knife') applyKnifeMotion(delta, moving, bx, by, airY, swayX, swayY, leanRoll);
+    }
+
+    // 칼 모션 상태머신: 시간 진행 + 데미지 타이밍 + 자세 계산 (매 프레임)
+    // bx,by,airY,swayX,swayY,leanRoll: applyGunMotion에서 계산한 흔들림/이동 값
+    function applyKnifeMotion(delta, moving, bx, by, airY, swayX, swayY, leanRoll) {
+      const ka = knifeAnim;
+      ka.t += delta;
+
+      // --- 상태 전이 + 데미지 판정 시점 처리 ---
+      if (ka.state === 'Knife_Attack' || ka.state === 'Knife_HeavyAttack') {
+        const spec = KNIFE_ANIM[ka.state];
+        if (!ka.hitDone && ka.t >= spec.hit) { doKnifeHit(ka.heavy); ka.hitDone = true; }  // 모션 중간에 1회 판정
+        if (ka.t >= spec.dur) { ka.state = 'Knife_Idle'; ka.t = 0; }                       // 끝나면 Idle
+      } else if (ka.state === 'Knife_Equip') {
+        if (ka.t >= KNIFE_ANIM.Knife_Equip.dur) { ka.state = 'Knife_Idle'; ka.t = 0; }
+      } else if (ka.state === 'Knife_Inspect') {
+        if (moving || ka.t >= KNIFE_ANIM.Knife_Inspect.dur) { ka.state = 'Knife_Idle'; ka.t = 0; }  // 움직이면 취소
+      }
+      // Idle/Run은 이동 여부로 매 프레임 결정(루프)
+      if (ka.state === 'Knife_Idle' || ka.state === 'Knife_Run') ka.state = moving ? 'Knife_Run' : 'Knife_Idle';
+
+      // --- 기본(Idle) 자세: 발로란트처럼 오른손은 화면 오른쪽 아래,
+      //     칼끝(-z)은 위로 들려 화면 중앙을 향하고, 살짝 대각선으로 눕힌 느낌.
+      //     px=좌우(↑오른쪽) py=상하(음수=아래) pz=거리(음수=앞)
+      //     rx=칼끝 상하(↑위로 들림) ry=칼끝 좌우(중앙으로) rz=눕힘(대각선) ---
+      let px = 0.30, py = -0.42, pz = -0.60;
+      let rx = 0.30, ry = 0.38, rz = -0.34;
+      const dir = ka.dir;
+
+      if (ka.state === 'Knife_Run') {
+        // Knife_Run: 살짝 더 내려 들고(걷기 흔들 bx/by가 위아래 흔듦)
+        py += -0.03; rx += 0.05;
+      } else if (ka.state === 'Knife_Equip') {
+        // Knife_Equip: 아래·오른쪽에서 손목을 돌리며 빠르게 올라와 Idle로 (0.42초)
+        const k = 1 - ka.t / KNIFE_ANIM.Knife_Equip.dur;   // 1→0
+        const e = k * k;                                    // 끝으로 갈수록 부드럽게(easeOut)
+        px += 0.14 * e; py += -0.36 * e; pz += 0.10 * e;
+        rx += 0.55 * e; rz += 1.7 * e;                      // 손목 회전
+      } else if (ka.state === 'Knife_Attack') {
+        // Knife_Attack: 중앙으로 짧게 튀어나가 찌르고(베고) 복귀. dir로 좌우 번갈아
+        const p = ka.t / KNIFE_ANIM.Knife_Attack.dur;      // 0→1
+        const s = Math.sin(p * Math.PI);                   // 0→1→0
+        px += (-dir * 0.20 - 0.10) * s;                    // 중앙 쪽으로
+        py += 0.05 * s;
+        pz += -0.30 * s;                                   // 앞으로 찌름
+        rx += -0.22 * s;
+        ry += dir * 0.65 * s;
+        rz += -dir * 0.45 * s;
+      } else if (ka.state === 'Knife_HeavyAttack') {
+        // Knife_HeavyAttack: 뒤로 크게 당겼다(wind-up) 묵직하게 휘두르고 복귀 (0.6초)
+        const p = ka.t / KNIFE_ANIM.Knife_HeavyAttack.dur; // 0→1
+        const s = p < 0.3 ? -0.4 * (p / 0.3)               // 0→-0.4 (당김)
+                          : Math.sin(((p - 0.3) / 0.7) * Math.PI);   // 0→1→0 (휘둘러 복귀)
+        const sw = Math.max(0, s), wu = Math.min(0, s);
+        px += -0.58 * sw - 0.18 * wu;                      // 휘두를 땐 왼쪽, 당길 땐 오른쪽
+        py += 0.07 * sw;
+        pz += -0.34 * sw - 0.10 * wu;                      // 휘두를 땐 앞, 당길 땐 뒤
+        rx += -0.30 * sw;
+        ry += 1.35 * sw + 0.55 * wu;
+        rz += -1.25 * sw - 0.45 * wu;
+      } else if (ka.state === 'Knife_Inspect') {
+        // Knife_Inspect: 칼을 가운데로 가져와 빙글 돌려보고 복귀 (1.8초, 과하지 않게)
+        const p = ka.t / KNIFE_ANIM.Knife_Inspect.dur;     // 0→1
+        const env = Math.sin(p * Math.PI);                 // 가져왔다 되돌림(0→1→0)
+        px += -0.18 * env; py += 0.10 * env; pz += -0.10 * env;
+        rx += -0.30 * env;
+        ry += Math.sin(p * Math.PI * 2) * 0.8 * env;       // 좌우로 돌려봄
+        rz += (0.5 + Math.sin(p * Math.PI * 2 - 1) * 1.2) * env;   // 칼날을 빙글 회전해 살펴봄
+      }
+
+      // --- 흔들림/이동 반영(공통) — 공격 중엔 흔들림을 줄여 손·칼·카메라가 따로 놀지 않게 ---
+      const km = (ka.state === 'Knife_Attack' || ka.state === 'Knife_HeavyAttack') ? 0.25 : 1;
+      gunHolder.position.set(px + (bx + swayX * 0.3) * km, py + (by + airY) * km, pz);
+      gunHolder.rotation.set(rx + swayY * km, ry + swayX * km, rz + leanRoll * km);
+    }
+
+    // ---------- 게임 루프 ----------
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = Math.min(clock.getDelta(), 0.1);
+      if (controls.isLocked && !gameOver) update(delta);
+
+      // 구름 천천히 흐르기 (멈춰있어도 흐름)
+      for (const c of clouds) {
+        c.sprite.position.x += c.speed * delta;
+        if (c.sprite.position.x > 280) c.sprite.position.x = -280;
+      }
+
+      // 카메라 흔들림(반동) + 착지 움푹 + 수직 반동: 잠깐 적용해 그린 뒤 원래대로 복구
+      const obj = controls.getObject();
+      let sx = 0, sy = 0;
+      if (shake > 0.0005) {
+        sx = (Math.random() - 0.5) * shake;
+        sy = (Math.random() - 0.5) * shake;
+      }
+      obj.position.x += sx;
+      obj.position.y += sy - landDip;
+      const savedQuat = camera.quaternion.clone();
+      if (viewRecoil > 0.0001) camera.rotateX(viewRecoil);  // 화면이 위로 살짝 튐
+      renderer.autoClear = true;
+      renderer.render(scene, camera);    // ① 배경(월드) — 줌 적용됨
+      const bg = scene.background;        // ② 총 패스에선 배경을 다시 칠하지 않게(맵 덮어쓰기 방지)
+      scene.background = null;
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(scene, gunCam);    // 총 — 고정 화각으로 위에 덧그림
+      renderer.autoClear = true;
+      scene.background = bg;             // 배경 복구
+      camera.quaternion.copy(savedQuat);
+      obj.position.x -= sx;
+      obj.position.y -= sy - landDip;
+
+      // 효과들 부드럽게 회복
+      shake *= 0.82;       if (shake < 0.0005) shake = 0;
+      landDip *= 0.82;     if (landDip < 0.001) landDip = 0;
+      viewRecoil += (0 - viewRecoil) * Math.min(1, delta * 8);
+    }
+
+    // 게임 시작! (첫 웨이브는 시작 버튼을 눌러 잠금이 걸릴 때 startWave()로 시작됨)
+    equip('pistol');
+    updateHUD();
+    animate();
+  </script>
+</body>
+</html>
