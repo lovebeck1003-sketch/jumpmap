@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>점프맵</title>
+<title>점프맵 · PC</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:linear-gradient(to top, #081223 0%, #04061b 55%, #000 100%);overflow:hidden;font-family:'Courier New',monospace;user-select:none;}
@@ -19,6 +19,7 @@ body{background:linear-gradient(to top, #081223 0%, #04061b 55%, #000 100%);over
 #ctrl{position:fixed;bottom:14px;right:14px;color:rgba(255,255,255,0.42);font-size:11px;text-align:right;line-height:1.9;pointer-events:none;}
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;z-index:10;}
 #overlay h1{font-size:34px;letter-spacing:3px;color:#ffdd00;}
+.verbadge{font-size:13px;color:#7fd6ff;letter-spacing:2px;vertical-align:middle;border:1px solid rgba(127,214,238,0.5);border-radius:10px;padding:2px 8px;margin-left:8px;}
 #overlay p{font-size:13px;color:#aaa;line-height:2.0;text-align:center;}
 #overlay p.legend{font-size:12px;line-height:1.8;display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:center;}
 #overlay p.legend span{white-space:nowrap;}
@@ -76,7 +77,7 @@ body.freelook #touch{display:none;}
 #tb-shop{position:fixed;right:max(16px,env(safe-area-inset-right));top:74px;width:50px;height:50px;font-size:22px;pointer-events:auto;}
 body.touch #audio-ind{bottom:auto;top:74px;left:16px;font-size:26px;}
 /* ── 메인 메뉴(모드 선택) ── */
-#mainmenu{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;
+#mainmenu{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:safe center;gap:30px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:24px 12px;
   background:radial-gradient(ellipse at 50% 28%, rgba(26,40,78,0.72), rgba(2,4,14,0.94));color:#fff;}
 #mainmenu .mm-title{font-size:62px;letter-spacing:12px;font-weight:bold;text-shadow:0 0 32px rgba(120,170,255,0.6);}
 #mainmenu .mm-sub{font-size:13px;letter-spacing:5px;color:#9fb4d8;margin-top:8px;text-align:center;}
@@ -202,7 +203,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 </div>
 <div id="overlay">
   <button id="tomenu">← 메인 메뉴</button>
-  <h1>JUMP MAP</h1>
+  <h1>JUMP MAP <span class="verbadge">🖥 PC</span></h1>
   <p>마우스 드래그로 시야 전환<br>WASD 이동 · SPACE 점프(더블점프)<br>Q: 글라이드 · E: 점프 · Z: 비행 · C: 슬로우 · R: 엘리베이터(시작 지점만)<br>목표는 가장 높은 플랫폼까지 도달하는 것입니다</p>
   <p class="legend">특수 발판 ─
     <span style="color:#22ff77">↑ 점프대</span>
@@ -3829,7 +3830,7 @@ window.addEventListener('wheel',e=>{
 }, {passive:true});
 
 /* ── 모바일 터치 컨트롤 ── */
-const IS_TOUCH = location.search.indexOf('touch')>=0 || (window.matchMedia && matchMedia('(pointer:coarse)').matches) || ('ontouchstart' in window) || navigator.maxTouchPoints>0;   // ?touch 붙이면 PC에서도 강제 표시(미리보기)
+const IS_TOUCH = false;   // PC 전용 버전 — 모바일(터치) 조작 미표시
 let touchMove={active:false,x:0,y:0};   // 가상 조이스틱 아날로그 벡터(x:우, y:전진, 크기 0~1)
 if(IS_TOUCH){
   document.body.classList.add('touch');
