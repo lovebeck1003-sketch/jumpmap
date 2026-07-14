@@ -3605,6 +3605,12 @@ const UPGRADES=[
   {key:'lavagrace',name:'물 유예시간',     icon:'🌊', max:3, prices:[50,100,180],         color:'#55a8ff', eff:l=>'물 유예 +'+(1.5*l).toFixed(1)+'초'}
 ];
 
+// ── 튜닝 상수(변경): 우주 저중력 · 인게임 상점 잠금 ──
+const SPACE_LOW_GRAV   = 0.55;     // 우주에서 중력이 가벼워지는 정도(최대 -55%) — 달처럼 붕 뜨는 느낌. 0이면 기존과 동일
+const SPACE_GRAV_START = 0.2;      // 이 고도 비율(0=지상~1=우주)부터 우주 저중력이 서서히 적용
+const SPACE_FALL_SLOW  = 0.5;      // 우주에서 최대 낙하속도 감소(최대 -50%) — 천천히 하강
+const SHOP_DISABLED_IN_RUN = true; // 게임 중(플레이 중) 상점 사용 잠금 — 일단 비활성화
+
 // ── 미션 시스템 추가: 미션 풀 정의 (val=현재진행도, valid=완료 가능 조건) ──
 const MISSION_POOL=[
   {key:'coin10',     label:'코인 10개 먹기',           goal:10, reward:10, modes:['normal','quake','electric','lava'], val:m=>m.coins},
@@ -3615,7 +3621,16 @@ const MISSION_POOL=[
   {key:'boost3',     label:'부스트 발판 3개 밟기',       goal:3,  reward:20, modes:['normal'],                          val:m=>m.boost},
   {key:'safe5',      label:'전기 안전 발판 5개 밟기',    goal:5,  reward:20, modes:['electric'],                        val:m=>m.safe},
   {key:'lava60',     label:'홍수 모드 높이 60 도달',     goal:60, reward:35, modes:['lava'],                            val:(m,h)=>Math.floor(h)},
-  {key:'noFall80',   label:'안 떨어지고 높이 80 도달',   goal:80, reward:35, modes:['normal','quake','electric','lava'], val:(m,h)=>Math.floor(h), valid:m=>!m.fell}
+  {key:'noFall80',   label:'안 떨어지고 높이 80 도달',   goal:80, reward:35, modes:['normal','quake','electric','lava'], val:(m,h)=>Math.floor(h), valid:m=>!m.fell},
+  // ── 추가 미션(다양성): 목표를 늘려 매 판 새로운 조합 + 상위 도전 목표 ──
+  {key:'coin20',     label:'코인 20개 먹기',            goal:20, reward:20, modes:['normal','quake','electric','lava'], val:m=>m.coins},
+  {key:'coin30',     label:'코인 30개 먹기',            goal:30, reward:40, modes:['normal','quake','electric','lava'], val:m=>m.coins},
+  {key:'cp3',        label:'체크포인트 3개 찍기',        goal:3,  reward:20, modes:['normal','quake','electric','lava'], val:m=>m.cps},
+  {key:'boost5',     label:'부스트 발판 5개 밟기',       goal:5,  reward:30, modes:['normal'],                          val:m=>m.boost},
+  {key:'crumble5',   label:'붕괴 발판 5개 밟기',         goal:5,  reward:30, modes:['normal','quake'],                  val:m=>m.crumble},
+  {key:'high100',    label:'높이 100 도달',             goal:100,reward:50, modes:['normal','quake','electric','lava'], val:(m,h)=>Math.floor(h)},
+  {key:'purist60',   label:'스킬 없이 높이 60 도달',     goal:60, reward:45, modes:['normal','quake','electric'],        val:(m,h)=>Math.floor(h), valid:m=>!m.usedGlide && !m.usedJump},
+  {key:'noFall120',  label:'안 떨어지고 높이 120 도달',  goal:120,reward:60, modes:['normal','quake','electric','lava'], val:(m,h)=>Math.floor(h), valid:m=>!m.fell}
 ];
 let missions=[];          // 이번 판의 활성 미션 3개
 function newMRun(){ return {coins:0,cps:0,crumble:0,boost:0,safe:0,fell:false,usedGlide:false,usedJump:false,boostSet:new Set(),safeSet:new Set()}; }
@@ -4037,6 +4052,7 @@ function buyLive(key){
 function openShop(){
   if(won || paused) return;
   if(document.getElementById('overlay').style.display!=='none') return;  // 허브에선 안 엶
+  if(SHOP_DISABLED_IN_RUN){ showPickup('🔒 상점은 게임 중 사용할 수 없습니다'); return; }  // 게임 중 상점 잠금(일단)
   paused=true;
   if(document.exitPointerLock) document.exitPointerLock();
   renderShopModal();
@@ -4431,8 +4447,15 @@ function update(){
       showPickup('엘리베이터 도착');
     }
   } else {
-    vy -= (eff.fly>0 ? 0.008 : 0.014);
-    if(vy<-0.7) vy=-0.7;
+    // 우주 저중력(변경): 고도가 높을수록 중력이 '가벼워짐' — 달처럼 붕 뜨고 천천히 하강(우주 = 저중력)
+    let gBase = (eff.fly>0 ? 0.008 : 0.014);
+    const topY = platforms[platforms.length-1].y;
+    const alt = topY>0 ? Math.max(0, Math.min(1, py/(topY*0.9))) : 0;                 // 0=지상, 1=우주
+    const spaceAmt = Math.max(0, (alt - SPACE_GRAV_START) / (1 - SPACE_GRAV_START));  // 우주 구간 진입 비율
+    gBase *= (1 - spaceAmt * SPACE_LOW_GRAV);                                         // 우주로 갈수록 저중력(가벼움)
+    vy -= gBase;
+    const fallCap = -0.7 * (1 - spaceAmt * SPACE_FALL_SLOW);                          // 우주에선 천천히 하강(체감)
+    if(vy < fallCap) vy = fallCap;
     if(eff.glide>0 && vy<-0.06) vy=-0.06;   // 글라이드 중엔 천천히 하강(추락 충격 완화)
 
     px+=vx; py+=vy; pz+=vz;
