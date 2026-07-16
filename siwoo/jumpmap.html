@@ -162,7 +162,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 </div>
 <div id="cp-hud" style="position:fixed;top:50%;left:14px;transform:translateY(-50%);color:rgba(255,255,255,0.55);font-size:11px;line-height:2.0;pointer-events:none;"></div>
 <div id="lava-hud" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);display:none;font-weight:800;font-size:15px;letter-spacing:1px;color:#ffce8a;text-shadow:0 0 10px rgba(255,80,20,0.9);pointer-events:none;"></div>
-<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인20)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
+<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인50)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
 <div id="flash"></div>
 <div id="rainveil"></div>
 <div id="settingsBtn" title="설정">⚙ 설정</div>
@@ -3564,7 +3564,7 @@ let onGround=false, jumpsLeft=2;
 let standingOnIdx=-1; // 현재 서있는 발판 인덱스
 let lastSafeX=0, lastSafeY=2, lastSafeZ=0; // 쉴드용 마지막 안전 위치
 let coins=0, height=0, bestH=0;
-const elevatorCost=20, elevatorRise=200;   // 코인 20개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
+const elevatorCost=50, elevatorRise=200;   // 코인 50개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
 const storageKey='SIWOO_bestH';
 const coinStorageKey='SIWOO_coins';
 const clearsKey='SIWOO_clears';
@@ -4109,7 +4109,14 @@ function initMissions(){
   const pool=MISSION_POOL.filter(m=>m.modes.indexOf(gameMode)>=0);
   const arr=pool.slice();
   for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=arr[i]; arr[i]=arr[j]; arr[j]=t; }
-  missions=arr.slice(0,3).map(m=>Object.assign({},m,{done:false}));
+  missions=arr.slice(0,3).map(m=>{
+    // ── 목표 수치도 랜덤: 원래 목표의 0.6~1.5배 (보상·라벨 문구도 함께 조정) ──
+    const base=m.goal;
+    const ng=Math.max(1, Math.round(base*(0.6+Math.random()*0.9)));
+    const label=m.label.replace(String(base), String(ng));
+    const reward=Math.max(1, Math.round(m.reward*ng/base));
+    return Object.assign({},m,{done:false, goal:ng, reward, label});
+  });
 }
 function completeMission(m){
   m.done=true;
