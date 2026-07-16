@@ -150,6 +150,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
     <div class="stat"><div class="sl">BEST</div><div class="sv" id="bv" style="color:#adf">0</div></div>
   </div>
 </div>
+<div id="hp-hud" style="position:fixed;top:58px;left:50%;transform:translateX(-50%);font-size:24px;letter-spacing:2px;pointer-events:none;z-index:6;text-shadow:0 2px 6px #000;"></div>
 <div id="inv">
   <div class="slot" id="s0"><span>글라이드</span><span>Q</span><span id="sc0">0</span></div>
   <div class="slot" id="s1"><span>점프</span><span>E</span><span id="sc1">0</span></div>
@@ -175,8 +176,6 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
     <label class="set-row"><span>🚀 비행 (Z)</span><input type="checkbox" data-gs="fly"></label>
     <label class="set-row"><span>🐢 슬로우 (C)</span><input type="checkbox" data-gs="slow"></label>
     <label class="set-row"><span>🛗 엘리베이터 (R)</span><input type="checkbox" data-gs="elev"></label>
-    <div class="set-sec">환경</div>
-    <label class="set-row"><span>🌧️ 비 효과</span><input type="checkbox" data-gs="rain"></label>
     <button id="setClose">닫기</button>
   </div>
 </div>
@@ -3079,8 +3078,8 @@ function updateSky(){
   const landOp=cl(1 - t/0.34);
   landGroup.visible = landOp>0.01;
   if(landOp>0.01) landGroup.traverse(o=>{ if(o.isMesh) o.material.opacity=landOp; });
-  // 비: 지구권(t<0.3)에서만 가끔 — 토글식 날씨
-  if(t<0.3 && GS.rain!==false){
+  // 비: 완전 제거(사용자 요청) — 항상 비활성
+  if(false){
     if(--rainTimer<=0){
       rainTarget = rainTarget>0.5 ? 0 : 1;
       rainTimer  = rainTarget>0.5 ? (900+Math.random()*600|0) : (9000+Math.random()*4200|0);  // 비 15~25초 / 갬 약 150~220초(3분 간격)
@@ -3216,7 +3215,7 @@ function makeMarkerSprite(kind){
   const mat=new THREE.SpriteMaterial({map:markerTexture(kind),transparent:true,depthWrite:false});
   const sp=new THREE.Sprite(mat); sp.scale.set(1.15,1.15,1.15); return sp;
 }
-const ICOLS={coin:0xffdd00,fly:0x00aaff,jump:0xff6600,glide:0x88ffcc,slow:0x88bbff};
+const ICOLS={coin:0xffdd00,fly:0x00aaff,jump:0xff6600,glide:0x88ffcc,slow:0x88bbff,heart:0xff4466};
 
 let platforms=[], items=[], platMeshes=[], itemMeshes=[];
 let elevatorMesh=null, elevatorActive=false, elevatorTargetY=0, elevatorDestIdx=-1, elevatorY=0;
@@ -3374,6 +3373,7 @@ function genMap(){
       else if(r < 0.24) type='jump';
       else if(r < 0.34) type='glide';
       else if(r < 0.40) type='slow';
+      else if(r < 0.46) type='heart';   // ❤️ 체력 회복 아이템 (가끔)
       items.push({x,y:y+0.75,z,type,alive:true,ang:Math.random()*Math.PI*2});
       itemMeshes.push(makeItem(items[items.length-1]));
     }
@@ -3393,6 +3393,7 @@ const skCtx=skCanvas.getContext('2d');
 const skTex=new THREE.CanvasTexture(skCanvas);
 skTex.magFilter=THREE.LinearFilter; skTex.minFilter=THREE.LinearMipmapLinearFilter;
 const playerSprite=new THREE.Sprite(new THREE.SpriteMaterial({map:skTex, transparent:true, depthWrite:false}));
+playerSprite.renderOrder=12;   // 배경(구름·태양 등 투명 요소) 위에 항상 그려 캐릭터가 투명해지지 않게
 const SK_HEIGHT=2.7;
 playerSprite.scale.set(SK_HEIGHT*SK_W/SK_H, SK_HEIGHT, 1);
 playerSprite.position.y=SK_HEIGHT/2-0.10;     // 발(캔버스 하단 여백 보정)이 그룹 원점(=py)에 오도록
@@ -3571,6 +3572,8 @@ let inv={fly:0,jump:0,glide:0,slow:0};
 let eff={fly:0,jump:0,glide:0,slow:0};
 let reviveStock=0;          // 부활권: 추락/용암 즉사 시 자동 사용 → 안전 지점 복귀
 let shieldStock=0, shieldInvuln=0;   // 보호막: 전기 감전 1회 방어 + 짧은 무적
+let hp=3, maxHp=3, hurtInvuln=0;     // ❤️ 체력 하트: 데미지 발판 밟으면 1칸 감소(잠시 무적), 0이면 사망. ❤️ 아이템으로 회복
+let touchCrouch=false;               // 모바일 앉기 버튼 눌림 상태
 let prevOnGround=true, fallVy=0;   // 착지 감지(먼지/소리)용
 let gameMode='normal';      // 'normal' | 'quake'(지진) | 'electric'(전기)
 let electricT=0, electricCharge=0, electricZap=false;   // 전기 모드 5초 주기
@@ -3604,11 +3607,10 @@ const UPGRADES=[
   {key:'lavagrace',name:'물 유예시간',     icon:'🌊', max:3, prices:[50,100,180],         color:'#55a8ff', eff:l=>'물 유예 +'+(1.5*l).toFixed(1)+'초'}
 ];
 
-// ── 튜닝 상수(추가): 우주 중력 · 인게임 상점 잠금 ──
-const SPACE_GRAV_UP    = 0.25;     // 우주에서 점프(상승)가 무거워지는 정도(+25%) — 점프 살짝 짧아짐(더블점프로 여전히 도달 가능)
-const SPACE_GRAV_DOWN  = 1.0;      // 우주에서 낙하가 무거워지는 정도(+100%) — 빠르게 추락, 확실히 체감
-const SPACE_GRAV_START = 0.2;      // 이 고도 비율(0=지상~1=우주)부터 우주 중력이 서서히 적용
-const SPACE_FALL_CAP   = 0.6;      // 우주에서 최대 낙하속도 상향(+60%). 0이면 기존 -0.7 유지
+// ── 튜닝 상수(변경): 우주 저중력 · 인게임 상점 잠금 ── (PC 버전과 동일하게 맞춤)
+const SPACE_LOW_GRAV   = 0.55;     // 우주에서 중력이 가벼워지는 정도(최대 -55%) — 달처럼 붕 뜨는 느낌. 0이면 기존과 동일
+const SPACE_GRAV_START = 0.2;      // 이 고도 비율(0=지상~1=우주)부터 우주 저중력이 서서히 적용
+const SPACE_FALL_SLOW  = 0.5;      // 우주에서 최대 낙하속도 감소(최대 -50%) — 천천히 하강
 const SHOP_DISABLED_IN_RUN = true; // 게임 중(플레이 중) 상점 사용 잠금 — 일단 비활성화
 
 // ── 미션 시스템 추가: 미션 풀 정의 (val=현재진행도, valid=완료 가능 조건) ──
@@ -3966,6 +3968,7 @@ function updateHUD(){
   document.getElementById('cv').textContent=coins;
   document.getElementById('lv').textContent=Math.floor(Math.max(0,height)/10)+1;
   document.getElementById('bv').textContent=Math.round(bestH);               // 최고 높이(저장됨)
+  const hpEl=document.getElementById('hp-hud'); if(hpEl){ let hs=''; for(let i=0;i<maxHp;i++) hs+=(i<hp?'❤️':'🖤'); hpEl.textContent=hs; }   // ❤️ 체력 하트 표시
   document.getElementById('cp-hud').innerHTML='체크포인트<br><b style="font-size:16px;color:#00ff88">'+(cpIdx+1)+'</b> / '+checkpoints.length;
   const lh=document.getElementById('lava-hud');
   const inHub=document.getElementById('overlay').style.display!=='none';
@@ -3989,6 +3992,7 @@ function restart(){
   eff={jump:0,glide:0,fly:0,slow:0};
   inv={jump:0,glide:0,fly:0,slow:0};
   reviveStock=0; shieldStock=0; shieldInvuln=0;
+  hp=maxHp; hurtInvuln=0;
   flyCd=0;
   won=false;tick=0;cpIdx=-1;
   electricT=0; electricCharge=0; electricZap=false;
@@ -4340,6 +4344,7 @@ function update(){
   if(eff.glide>0) eff.glide--;   // 글라이드: 낙하 감속(아래 중력 처리에서 vy 하한 적용)
   if(flyCd>0) flyCd--;
   if(shieldInvuln>0) shieldInvuln--;
+  if(hurtInvuln>0) hurtInvuln--;
 
   // ⚡ 전기 모드: 5초 주기(충전→찌릿). electricCharge 0~1, electricZap=치명 구간
   if(gameMode==='electric'){
@@ -4454,14 +4459,14 @@ function update(){
       showPickup('엘리베이터 도착');
     }
   } else {
-    // 우주 중력(추가): 고도가 높을수록 점프는 조금 짧아지고 낙하는 크게 무거워짐 — 확실히 체감되면서도 코스는 클리어 가능
+    // 우주 저중력(변경): 고도가 높을수록 중력이 '가벼워짐' — 달처럼 붕 뜨고 천천히 하강 (PC와 동일)
     let gBase = (eff.fly>0 ? 0.008 : 0.014);
     const topY = platforms[platforms.length-1].y;
     const alt = topY>0 ? Math.max(0, Math.min(1, py/(topY*0.9))) : 0;                 // 0=지상, 1=우주
     const spaceAmt = Math.max(0, (alt - SPACE_GRAV_START) / (1 - SPACE_GRAV_START));  // 우주 구간 진입 비율
-    gBase *= (1 + spaceAmt * (vy < 0 ? SPACE_GRAV_DOWN : SPACE_GRAV_UP));             // 상승은 살짝·하강은 크게 무겁게
+    gBase *= (1 - spaceAmt * SPACE_LOW_GRAV);                                         // 우주로 갈수록 저중력(가벼움)
     vy -= gBase;
-    const fallCap = -0.7 * (1 + spaceAmt * SPACE_FALL_CAP);                           // 우주에선 더 빠른 낙하 허용(체감)
+    const fallCap = -0.7 * (1 - spaceAmt * SPACE_FALL_SLOW);                          // 우주에선 천천히 하강(체감)
     if(vy < fallCap) vy = fallCap;
     if(eff.glide>0 && vy<-0.06) vy=-0.06;   // 글라이드 중엔 천천히 하강(추락 충격 완화)
 
@@ -4506,7 +4511,17 @@ function update(){
     } else if(sp.kind==='crumble'){
       if(sp.cstate==='solid'){ sp.cstate='breaking'; sp.ctimer = gameMode==='quake' ? 50 : CRUMBLE_BREAK; mrun.crumble++; if(gameMode!=='quake') showPickup('발판이 무너진다!'); }   // 미션: 붕괴 발판 밟기
     } else if(sp.kind==='hazard'){
-      if(!loseLife('☠ 용암 발판!')) return;
+      // ☠ 데미지 발판: 즉사 대신 체력 1칸 감소(잠시 무적). 체력 0이면 사망 처리.
+      if(hurtInvuln<=0){
+        hp--; hurtInvuln=70;   // 약 1.2초 무적 (계속 서 있어도 도배 데미지 방지)
+        doFlash('rgba(255,40,40,.6)'); sfxHit(); burst(px,py+0.4,pz, 10, 1.0,0.3,0.3);
+        if(hp<=0){
+          if(!loseLife('☠ 체력 소진!')) return;   // 부활권/체크포인트 있으면 복귀
+          hp=maxHp; hurtInvuln=70;                 // 복귀 시 체력 회복
+        } else {
+          showPickup('☠ 데미지! ❤️ '+hp+'/'+maxHp);
+        }
+      }
     } else if(sp.kind==='electric'){
       // ⚡ 감전 구간에 전기 발판 위에 있으면 — 보호막 있으면 막고, 없으면 죽음
       if(electricZap && shieldInvuln<=0){
@@ -4544,6 +4559,11 @@ function update(){
       else if(it.type==='jump'){inv.jump++;showPickup('점프 장치 획득');}
       else if(it.type==='glide'){inv.glide++;showPickup('글라이드 획득 - Q로 사용');}
       else if(it.type==='slow'){inv.slow++;showPickup('슬로우 아이템 획득');}
+      else if(it.type==='heart'){
+        if(hp<maxHp){ hp++; showPickup('❤️ 체력 회복 +1 ('+hp+'/'+maxHp+')'); }
+        else { coins+=5; saveCoins(); showPickup('❤️ 체력 가득 → 코인 +5'); }
+        doFlash('rgba(255,60,90,.28)'); sfxCoin(); burst(it.x,it.y,it.z, 14, 1.0,0.3,0.4);
+      }
       updateInv();
     }
   }
