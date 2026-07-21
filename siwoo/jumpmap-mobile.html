@@ -207,8 +207,8 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
     <div class="mode-card" id="mode-jump">
       <div class="mc-icon">🪂</div>
       <div class="mc-name">점프맵</div>
-      <div class="mc-desc">하늘 끝, 우주까지<br>발판을 밟고 올라가기</div>
-      <div class="mc-badge" style="background:rgba(80,220,140,0.25);color:#9affc4">▶ 플레이</div>
+      <div class="mc-desc">정상이 없다! 끝없이 위로<br>얼마나 높이 갈 수 있나</div>
+      <div class="mc-badge" style="background:rgba(80,220,140,0.25);color:#9affc4">▶ 기본 · 무한</div>
     </div>
     <div class="mode-card" id="mode-quake">
       <div class="mc-icon">🌋</div>
@@ -227,6 +227,12 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
       <div class="mc-name">홍수 탈출</div>
       <div class="mc-desc">밑에서 물이 차오른다!<br>멈추지 말고 정상까지</div>
       <div class="mc-badge" style="background:rgba(40,150,255,0.28);color:#8fd0ff">▶ 추격</div>
+    </div>
+    <div class="mode-card" id="mode-stage">
+      <div class="mc-icon">⏱️</div>
+      <div class="mc-name">타임어택</div>
+      <div class="mc-desc">시간과의 싸움!<br>단계 돌파로 시간 벌기</div>
+      <div class="mc-badge" style="background:rgba(255,180,80,0.28);color:#ffd9a0">▶ 단계도전</div>
     </div>
   </div>
 </div>
@@ -3315,71 +3321,105 @@ function makeCheckpoint(x,y,z){
   return {group,mat:poleMat,fmat};
 }
 
+// 발판 1칸 생성(무한 모드가 매 프레임 이어붙일 수 있도록 함수로 분리)
+function genPlatform(i){
+  const prev=platforms[i-1];
+  const endless = gameMode==='endless';
+  // 무한 모드는 난이도를 0.8에서 고정 / 타임어택은 완만하게 상승
+  const difficulty = endless ? Math.min(0.8, i/150)
+    : gameMode==='stage' ? Math.min(0.9, i/200)
+    : Math.min(1, i / 180);
+  const angle=Math.random()*Math.PI*2;
+  const dist=2.3+Math.random()*2.0 + difficulty * 1.3;
+  const x=prev.x+Math.cos(angle)*dist;
+  const z=prev.z+Math.sin(angle)*dist;
+  // 수직 간격은 난이도(상한 1)에 연동 — i에 무한 비례하면 후반이 점프 불가가 됨
+  const y=prev.y+1.0+Math.random()*0.9 + difficulty*0.6;
+  const w=Math.max(1.8, 3.2 - difficulty*1.5 + Math.random()*1.4);
+  const d=Math.max(1.8, 2.8 - difficulty*1.1 + Math.random()*1.4);
+
+  // 25칸마다 체크포인트 발판 — 무한·타임어택은 체크포인트 없음
+  const isCheckpoint = !endless && gameMode!=='stage' && (i % 25 === 0);
+  const moving = (gameMode==='normal'||gameMode==='stage') && !isCheckpoint && i>8 && Math.random() < 0.18 + difficulty * 0.22;
+
+  // 특수 발판 배정. 초반 5칸·움직임·체크포인트 발판은 제외(시작은 항상 안전).
+  // 위험 발판(붕괴/용암)은 난이도에 비례해 늘고, 도움/중립 발판은 일정 비율.
+  let kind='normal', dirX=0, dirZ=0;
+  if(gameMode==='quake'){
+    // 🌋 지진 모드: 거의 모든 발판이 무너진다! 초반 2칸·체크포인트만 안전(오아시스)
+    if(i>2 && !isCheckpoint) kind='crumble';
+  } else if(gameMode==='electric'){
+    // ⚡ 전기 모드: 5칸 중 1칸은 안전(safe), 나머지는 전기 발판(5초마다 감전)
+    if(i>2 && !isCheckpoint) kind = (i%5===0) ? 'safe' : 'electric';
+  } else if(i>5 && !moving && !isCheckpoint){
+    const kr=Math.random();
+    const crumbleC = 0.03 + difficulty*0.07;   // 3% → 10%
+    const hazardC  = gameMode==='lava' ? 0 : (0.01 + difficulty*0.06);   // 1% → 7% (용암 모드는 바닥 용암이 위협이라 발판 용암 제거)
+    let a=0;
+    if      (kr < (a+=0.08)) kind='bounce';
+    else if (kr < (a+=0.07)) kind='boost';
+    else if (kr < (a+=0.07)) kind='ice';
+    else if (kr < (a+=0.06)){ kind='conveyor'; const ca=Math.random()*Math.PI*2; dirX=Math.cos(ca); dirZ=Math.sin(ca); }
+    else if (kr < (a+=crumbleC)) kind='crumble';
+    else if (kr < (a+=hazardC))  kind='hazard';
+  }
+
+  const p={x,y,z,w,h:0.6,d,ci:i%PCOLS.length,moving,ox:x,prevX:x,amp:1.0+Math.random()*2.0,phase:Math.random()*Math.PI*2,kind,dirX,dirZ,cstate:'solid',ctimer:0,culled:false};
+  platforms.push(p); platMeshes.push(makePlat(p));
+  if(isCheckpoint){
+    const cpY = y + 0.4;
+    checkpoints.push({x,y:cpY,z,activated:false});
+    cpMeshes.push(makeCheckpoint(x,cpY,z));
+  }
+  if(kind!=='hazard' && Math.random() < 0.5 - difficulty*0.18){
+    const r=Math.random();
+    let type='coin';
+    if(r < 0.12) type='fly';
+    else if(r < 0.24) type='jump';
+    else if(r < 0.34) type='glide';
+    else if(r < 0.40) type='slow';
+    else if(r < 0.46) type='heart';   // ❤️ 체력 회복 아이템 (가끔)
+    items.push({x,y:y+0.75,z,type,alive:true,ang:Math.random()*Math.PI*2});
+    itemMeshes.push(makeItem(items[items.length-1]));
+  }
+}
+
 function genMap(){
   clearScene();
-  const start={x:0,y:0,z:0,w:10,h:1.0,d:10,ci:0,moving:false,ox:0,prevX:0,amp:0,phase:0,kind:'normal',dirX:0,dirZ:0,cstate:'solid',ctimer:0};
+  const start={x:0,y:0,z:0,w:10,h:1.0,d:10,ci:0,moving:false,ox:0,prevX:0,amp:0,phase:0,kind:'normal',dirX:0,dirZ:0,cstate:'solid',ctimer:0,culled:false};
   platforms.push(start); platMeshes.push(makePlat(start));
-  let x=0,y=0,z=0;
-  // 체크포인트: 25칸마다(i=25,50,...,175), 움직이는 발판에는 설치하지 않음
-  for(let i=1;i<200;i++){
-    const prev=platforms[i-1];
-    const difficulty = Math.min(1, i / 180);   // 200칸 코스 전체에 걸쳐 난이도 상승
-    const angle=Math.random()*Math.PI*2;
-    const dist=2.3+Math.random()*2.0 + difficulty * 1.3;
-    x=prev.x+Math.cos(angle)*dist;
-    z=prev.z+Math.sin(angle)*dist;
-    // 수직 간격은 난이도(상한 1)에 연동 — i에 무한 비례하면 후반이 점프 불가가 됨
-    y=prev.y+1.0+Math.random()*0.9 + difficulty*0.6;
-    const w=Math.max(1.8, 3.2 - difficulty*1.5 + Math.random()*1.4);
-    const d=Math.max(1.8, 2.8 - difficulty*1.1 + Math.random()*1.4);
-
-    // 25칸마다 체크포인트 발판 — 항상 일반·고정 발판으로 만들어 안전지대 보장
-    const isCheckpoint = (i % 25 === 0);
-    const moving = gameMode==='normal' && !isCheckpoint && i>8 && Math.random() < 0.18 + difficulty * 0.22;
-
-    // 특수 발판 배정. 초반 5칸·움직임·체크포인트 발판은 제외(시작은 항상 안전).
-    // 위험 발판(붕괴/용암)은 난이도에 비례해 늘고, 도움/중립 발판은 일정 비율.
-    let kind='normal', dirX=0, dirZ=0;
-    if(gameMode==='quake'){
-      // 🌋 지진 모드: 거의 모든 발판이 붕괴! 초반 2칸·체크포인트만 안전(오아시스)
-      if(i>2 && !isCheckpoint) kind='crumble';
-    } else if(gameMode==='electric'){
-      // ⚡ 전기 모드: 5칸 중 1칸은 안전(safe), 나머지는 전기 발판(5초마다 감전)
-      if(i>2 && !isCheckpoint) kind = (i%5===0) ? 'safe' : 'electric';
-    } else if(i>5 && !moving && !isCheckpoint){
-      const kr=Math.random();
-      const crumbleC = 0.03 + difficulty*0.07;   // 3% → 10%
-      const hazardC  = gameMode==='lava' ? 0 : (0.01 + difficulty*0.06);   // 1% → 7% (용암 모드는 바닥 용암이 위협이라 발판 용암 제거)
-      let a=0;
-      if      (kr < (a+=0.08)) kind='bounce';
-      else if (kr < (a+=0.07)) kind='boost';
-      else if (kr < (a+=0.07)) kind='ice';
-      else if (kr < (a+=0.06)){ kind='conveyor'; const ca=Math.random()*Math.PI*2; dirX=Math.cos(ca); dirZ=Math.sin(ca); }
-      else if (kr < (a+=crumbleC)) kind='crumble';
-      else if (kr < (a+=hazardC))  kind='hazard';
-    }
-
-    const p={x,y,z,w,h:0.6,d,ci:i%PCOLS.length,moving,ox:x,prevX:x,amp:1.0+Math.random()*2.0,phase:Math.random()*Math.PI*2,kind,dirX,dirZ,cstate:'solid',ctimer:0};
-    platforms.push(p); platMeshes.push(makePlat(p));
-    if(isCheckpoint){
-      const cpY = y + 0.4;
-      checkpoints.push({x,y:cpY,z,activated:false});
-      cpMeshes.push(makeCheckpoint(x,cpY,z));
-    }
-    if(kind!=='hazard' && Math.random() < 0.5 - difficulty*0.18){
-      const r=Math.random();
-      let type='coin';
-      if(r < 0.12) type='fly';
-      else if(r < 0.24) type='jump';
-      else if(r < 0.34) type='glide';
-      else if(r < 0.40) type='slow';
-      else if(r < 0.46) type='heart';   // ❤️ 체력 회복 아이템 (가끔)
-      items.push({x,y:y+0.75,z,type,alive:true,ang:Math.random()*Math.PI*2});
-      itemMeshes.push(makeItem(items[items.length-1]));
-    }
-  }
+  // 무한·타임어택 모드는 초기 55칸(이후 스트리밍) / 그 외 200칸
+  const count = (gameMode==='endless'||gameMode==='stage') ? 55 : 200;
+  for(let i=1;i<count;i++) genPlatform(i);
   // 엘리베이터는 R키로 호출할 때만 생성(시작 지점에 미리 두지 않음 — 잔상/이미지 버그 제거)
   elevatorActive = false;
+  deathFloor = -10;   // 무한·타임어택: 죽음 바닥 초기화(이후 플레이어를 따라 상승)
+}
+
+// 무한·타임어택: 플레이어가 오를수록 위로 발판을 이어붙이고, 멀리 아래는 정리(성능·메모리)
+function extendEndless(){
+  // 항상 플레이어보다 60 위까지 발판이 있도록 생성(프레임당 최대 30칸)
+  let guard=0;
+  while(platforms[platforms.length-1].y < py + 60 && guard++ < 30){
+    genPlatform(platforms.length);
+  }
+  // 죽음 바닥: 플레이어를 따라 상승(단조 증가). 이 아래로 떨어지면 사망.
+  deathFloor = Math.max(deathFloor, py - 40);
+  // 죽음 바닥보다 확실히 아래인 발판은 메시 정리(데이터는 인덱스 안정성 위해 남김)
+  for(let i=0;i<platforms.length;i++){
+    const p=platforms[i];
+    if(p.culled || i===standingOnIdx) continue;
+    if(p.y < deathFloor - 6){
+      const m=platMeshes[i];
+      if(m){
+        scene.remove(m);
+        if(m.userData && m.userData.marker && m.userData.marker.material) m.userData.marker.material.dispose();
+        m.geometry.dispose(); if(m.material) m.material.dispose();
+        platMeshes[i]=null;
+      }
+      p.culled=true;
+    }
+  }
 }
 
 // 플레이어 메시
@@ -3564,6 +3604,9 @@ let onGround=false, jumpsLeft=2;
 let standingOnIdx=-1; // 현재 서있는 발판 인덱스
 let lastSafeX=0, lastSafeY=2, lastSafeZ=0; // 쉴드용 마지막 안전 위치
 let coins=0, height=0, bestH=0;
+let endlessBest=0, deathFloor=-10;   // ♾️ 무한 모드: 전용 최고기록 + 플레이어를 따라오르는 죽음 바닥
+let stageLevel=1, stageTimeLeft=0, stageBest=0, nextStageY=0;   // ⏱️ 타임어택(무한): 현재 단계 / 남은시간 / 최고 단계 / 다음 단계 높이
+const STAGE_STEP=35, STAGE_TIME_BONUS=9, STAGE_INIT_TIME=25;    // 단계 높이 간격 / 돌파 시 시간보너스(초) / 시작 제한시간(초)
 const elevatorCost=50, elevatorRise=200;   // 코인 50개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
 const storageKey='SIWOO_bestH';
 const coinStorageKey='SIWOO_coins';
@@ -3667,10 +3710,32 @@ function saveClears(){
   try{localStorage.setItem(clearsKey, clears);}
   catch(e){}
 }
+// ♾️ 무한 모드 전용 최고기록(일반 최고높이와 분리 저장)
+const endlessKey='SIWOO_endless_best';
+function loadEndlessBest(){
+  try{return Math.max(0, parseFloat(localStorage.getItem(endlessKey) || '0'));}
+  catch(e){return 0;}
+}
+function saveEndlessBest(){
+  try{localStorage.setItem(endlessKey, Math.round(endlessBest));}
+  catch(e){}
+}
+// ⏱️ 타임어택 최고 단계 저장
+const stageKey='SIWOO_stage_best';
+function loadStageBest(){
+  try{return Math.max(0, parseInt(localStorage.getItem(stageKey) || '0', 10));}
+  catch(e){return 0;}
+}
+function saveStageBest(){
+  try{localStorage.setItem(stageKey, stageBest);}
+  catch(e){}
+}
 
 bestH = loadBest();
 coins = loadCoins();
 clears = loadClears();
+endlessBest = loadEndlessBest();
+stageBest = loadStageBest();
 loadout = loadLoadout();
 
 // ── 영구 업그레이드 / 완료 미션 수 저장·로드 추가 ──
@@ -3967,7 +4032,7 @@ function updateHUD(){
   document.getElementById('hv').textContent=Math.max(0,Math.round(py));      // 현재 높이(떨어지면 같이 하락)
   document.getElementById('cv').textContent=coins;
   document.getElementById('lv').textContent=Math.floor(Math.max(0,height)/10)+1;
-  document.getElementById('bv').textContent=Math.round(bestH);               // 최고 높이(저장됨)
+  document.getElementById('bv').textContent=Math.round(gameMode==='endless'?endlessBest:bestH);   // 최고 높이(저장됨; 무한모드는 전용 기록)
   const hpEl=document.getElementById('hp-hud'); if(hpEl){ let hs=''; for(let i=0;i<maxHp;i++) hs+=(i<hp?'❤️':'🖤'); hpEl.textContent=hs; }   // ❤️ 체력 하트 표시
   document.getElementById('cp-hud').innerHTML='체크포인트<br><b style="font-size:16px;color:#00ff88">'+(cpIdx+1)+'</b> / '+checkpoints.length;
   const lh=document.getElementById('lava-hud');
@@ -3977,6 +4042,11 @@ function updateHUD(){
     lh.style.display='block';
     if(margin<7){ lh.textContent='🌊 위험! '+margin.toFixed(1)+'m — 올라가!'; lh.style.color='#5ab8ff'; }
     else { lh.textContent='🌊 물 '+margin.toFixed(0)+'m 아래'; lh.style.color='#9fd8ff'; }
+  } else if(gameMode==='stage' && !inHub){
+    lh.style.display='block';
+    const s=Math.max(0,stageTimeLeft);
+    lh.textContent='⏱️ '+s.toFixed(1)+'s · '+stageLevel+'단계';
+    lh.style.color = s<5 ? '#ff6b6b' : '#ffe08a';
   } else { lh.style.display='none'; }
   renderMissions();   // 미션 HUD 갱신 추가
 }
@@ -3998,6 +4068,7 @@ function restart(){
   electricT=0; electricCharge=0; electricZap=false;
   cpUsesLeft = gameMode==='electric' ? 1 : Infinity;   // 전기 모드: 체크포인트 복귀 1회만
   resetMissionRun();                                   // 미션 진행 카운터 초기화(허브 복귀 시 깨끗하게)
+  stageLevel=1; nextStageY=STAGE_STEP; stageTimeLeft=STAGE_INIT_TIME;   // ⏱️ 타임어택: 새 판마다 1단계부터
   genMap();resetLava();updateInv();updateHUD();
 }
 
@@ -4171,6 +4242,7 @@ function beginRun(){
   if(gameMode==='electric') reviveStock=Math.min(1,reviveStock);   // 전기 모드: 부활 1회만
   loadout={glide:0,jump:0,fly:0,slow:0,revive:0,shield:0}; saveLoadout();
   resetMissionRun(); initMissions();      // 미션 시스템: 판 시작 시 랜덤 미션 3개 생성
+  if(gameMode==='stage'){ stageLevel=1; nextStageY=STAGE_STEP; stageTimeLeft=STAGE_INIT_TIME; }   // ⏱️ 새 타임어택 시작(1단계부터)
   document.getElementById('overlay').style.display='none';
   updateInv(); updateHUD();
   canvas.requestPointerLock();
@@ -4179,9 +4251,28 @@ function beginRun(){
 // 완전 사망(체크포인트/부활권 모두 없음) → 월드 리셋 후 허브로 복귀해 재보급
 function gameOver(){
   lastRunHeight=Math.round(Math.max(0,height));
-  restart();
+  const endlessNow = gameMode==='endless';
+  const stageNow = gameMode==='stage';
+  const stageReached = stageLevel;
+  const bestShown = endlessNow ? endlessBest : bestH;
+  restart();   // 타임어택: 새 판(1단계부터)
   if(document.exitPointerLock) document.exitPointerLock();
-  document.getElementById('last-run').textContent='이번 판 도달 높이 '+lastRunHeight+' · 최고 '+Math.round(bestH);
+  document.getElementById('last-run').textContent = stageNow
+    ? ('💀 '+stageReached+'단계에서 추락 · 최고 '+stageBest+'단계 — 다시 도전!')
+    : ((endlessNow?'♾️ 이번 판 최고 높이 ':'이번 판 도달 높이 ')+lastRunHeight+' · 최고 '+Math.round(bestShown));
+  renderShop();
+  document.getElementById('overlay').style.display='flex';
+}
+
+// ⏱️ 타임어택(무한): 제한시간 초과 → 판 종료 → 허브로(다음 시작은 1단계부터)
+function stageTimeout(){
+  doFlash('rgba(255,60,60,.7)'); sfxDeath();
+  const reached=stageLevel;
+  lastRunHeight=Math.round(Math.max(0,height));
+  restart();                          // 새 판(1단계부터)
+  if(document.exitPointerLock) document.exitPointerLock();
+  document.getElementById('last-run').textContent =
+    '⏱️ 시간 초과! '+reached+'단계 도달 · 최고 '+stageBest+'단계 — 다시 도전!';
   renderShop();
   document.getElementById('overlay').style.display='flex';
 }
@@ -4200,25 +4291,29 @@ function showMainMenu(){
 }
 function enterMode(mode){
   gameMode=mode;
+  if(mode==='stage') stageLevel=1;   // ⏱️ 타임어택은 항상 1단계부터
   restart();                 // 모드 반영 풀 리셋(genMap+위치+cpUsesLeft 등)
   document.body.classList.remove('menu');
   document.getElementById('mainmenu').style.display='none';
   renderShop(); updateHUD(); updateInv();
   const o=document.getElementById('overlay'); o.style.display='flex';
-  const titles={quake:'🌋 지진 모드', electric:'⚡ 전기 모드', lava:'🌊 홍수 탈출', normal:'JUMP MAP'};
+  const titles={quake:'🌋 지진 모드', electric:'⚡ 전기 모드', lava:'🌊 홍수 탈출', endless:'♾️ 무한 등반', stage:'⏱️ 타임어택', normal:'JUMP MAP'};
   const hints={
     quake:'모든 발판이 무너진다 — 멈추면 추락! 체크포인트만 안전.',
     electric:'5초마다 전기 발판이 찌릿! ✓안전 발판으로 피해. 엘리베이터 불가 · 체크포인트/부활 1회 · 🛡보호막으로 감전 방어.',
     lava:'밑에서 물이 끝없이 차오른다! 멈추면 잠긴다 — 정상까지 올라가 탈출하라. 체크포인트는 소용없다(부활권만 끌어올림).',
+    endless:'♾️ 정상이 없다! 발판이 끝없이 위로 생성된다 — 얼마나 높이 오를 수 있나? 크게 떨어지면 끝. 체크포인트 없음.',
+    stage:'⏱️ 시간이 흐른다! 끝없이 위로 오르며 일정 높이마다 단계 돌파 → 시간 보너스. 시간이 0이 되거나 크게 떨어지면 끝 — 몇 단계까지?',
     normal:''
   };
   document.querySelector('#overlay h1').textContent = titles[mode]||'JUMP MAP';
   document.getElementById('last-run').textContent = hints[mode]||'';
 }
-document.getElementById('mode-jump').addEventListener('click', ()=>enterMode('normal'));
+document.getElementById('mode-jump').addEventListener('click', ()=>enterMode('endless'));   // 🪂 기본 = 무한
 document.getElementById('mode-quake').addEventListener('click', ()=>enterMode('quake'));
 document.getElementById('mode-electric').addEventListener('click', ()=>enterMode('electric'));
 document.getElementById('mode-lava').addEventListener('click', ()=>enterMode('lava'));
+document.getElementById('mode-stage').addEventListener('click', ()=>enterMode('stage'));   // ⏱️ 타임어택
 document.getElementById('tomenu').addEventListener('click', showMainMenu);
 // 영구 업그레이드 버튼 이벤트 추가
 document.getElementById('perma-btn').addEventListener('click', openUpgrades);
@@ -4293,6 +4388,7 @@ function resolveCollisions(){
   for(let pi=0;pi<platforms.length;pi++){
     const p=platforms[pi];
     if(p.cstate==='gone') continue; // 무너져 사라진 발판은 충돌 없음
+    if(p.culled) continue;          // ♾️/⏱️ 무한·타임어택: 정리된 먼 발판은 충돌 없음
     const phh=p.h/2;
     const pMinX=p.x-p.w/2, pMaxX=p.x+p.w/2;
     const pMinY=p.y-phh,   pMaxY=p.y+phh;
@@ -4346,6 +4442,28 @@ function update(){
   if(shieldInvuln>0) shieldInvuln--;
   if(hurtInvuln>0) hurtInvuln--;
 
+  if(gameMode==='endless'||gameMode==='stage') extendEndless();   // ♾️/⏱️ 발판 무한 스트리밍 + 먼 발판 정리
+
+  if(gameMode==='stage'){                      // ⏱️ 제한시간 카운트다운 + 단계 돌파(실제 플레이 중에만)
+    const inHubT=document.getElementById('overlay').style.display!=='none';
+    const inMenuT=document.body.classList.contains('menu');
+    if(!inHubT && !inMenuT && !won){
+      stageTimeLeft -= 1/60;
+      // 일정 높이마다 단계 돌파 → 시간 보너스 + 코인 (단계는 무한)
+      while(py >= nextStageY){
+        const bonus = 12 + stageLevel*3;
+        coins += bonus; saveCoins();
+        stageTimeLeft += STAGE_TIME_BONUS;
+        doFlash('rgba(120,255,180,.5)'); sfxCoin();
+        showPickup('⏱️ '+stageLevel+'단계 돌파! +'+STAGE_TIME_BONUS+'초 · +'+bonus+'코인');
+        stageLevel++;
+        nextStageY += STAGE_STEP;
+        if(stageLevel-1 > stageBest){ stageBest=stageLevel-1; saveStageBest(); }
+      }
+      if(stageTimeLeft<=0){ stageTimeLeft=0; stageTimeout(); return; }
+    }
+  }
+
   // ⚡ 전기 모드: 5초 주기(충전→찌릿). electricCharge 0~1, electricZap=치명 구간
   if(gameMode==='electric'){
     electricT++;
@@ -4379,6 +4497,7 @@ function update(){
   // 움직이는 발판 + 붕괴 발판 업데이트
   for(let i=0;i<platforms.length;i++){
     const p=platforms[i];
+    if(p.culled) continue;          // ♾️/⏱️ 메시가 정리된 발판은 건너뜀(널 참조 방지)
     if(p.kind==='electric'){
       const mat=platMeshes[i].material;
       mat.emissiveIntensity = electricZap ? 1.9 : (0.22 + electricCharge*1.1);
@@ -4590,7 +4709,9 @@ function update(){
   }
 
   height=Math.max(height,py);
-  if(height>bestH){
+  if(gameMode==='endless'){
+    if(height>endlessBest){ endlessBest=height; saveEndlessBest(); }   // ♾️ 전용 기록에만 저장
+  } else if(height>bestH){
     bestH=height;
     saveBest();
   }
@@ -4607,13 +4728,14 @@ function update(){
     if(!lavaSwallow()) return;
   }
 
-  // 추락 처리
-  if(py < platforms[0].y-10){
+  // 추락 처리 (무한·타임어택은 따라오르는 죽음 바닥 기준)
+  const fallFloor = (gameMode==='endless'||gameMode==='stage') ? deathFloor : platforms[0].y-10;
+  if(py < fallFloor){
     if(!loseLife()) return;
   }
 
   const top=platforms[platforms.length-1];
-  if(!won&&py>top.y+0.5){ winGame(); }
+  if(gameMode!=='endless' && gameMode!=='stage' && !won && py>top.y+0.5){ winGame(); }   // ♾️/⏱️ 무한·타임어택은 정상/승리 없음
 
   if(eff.fly>0){
     vy += 0.013;
