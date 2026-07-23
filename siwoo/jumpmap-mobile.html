@@ -5051,21 +5051,22 @@ window.addEventListener('pointerdown',initAudio);
 window.addEventListener('keydown',initAudio);
 document.getElementById('audio-ind').addEventListener('click',e=>{ initAudio(); toggleMute(); e.stopPropagation(); });
 
-// 🔧 진단: 게임 루프에서 예외 발생 시 화면 상단에 오류 내용을 표시(빨강 멈춤 원인 파악용). 최초 1회만, 탭하면 닫힘.
-window.addEventListener('error', function(ev){
+// 🔧 진단+복구: 게임 루프 예외를 화면에 표시하고, 한 프레임 예외로 전체가 멈추지 않도록 계속 진행.
+function reportGameError(err){
   try{
+    const msg=(err&&err.stack)?err.stack:String(err);
     if(window.__errShown) return; window.__errShown=true;
-    const msg=(ev.error&&ev.error.stack)?ev.error.stack:((ev.message||'')+'  @'+(ev.filename||'')+':'+(ev.lineno||''));
     const d=document.createElement('div');
     d.style.cssText='position:fixed;left:6px;right:6px;top:6px;z-index:99999;background:rgba(30,0,0,.94);color:#ffdede;font:11px/1.4 monospace;padding:10px;border:1px solid #f55;border-radius:8px;white-space:pre-wrap;max-height:46vh;overflow:auto;';
     d.textContent='⚠ 게임 오류(이 내용을 캡처해서 알려주세요):\n'+msg+'\n\n[탭하면 닫힘]';
     d.onclick=function(){ d.remove(); window.__errShown=false; };
     document.body.appendChild(d);
   }catch(e){}
-});
+}
+window.addEventListener('error', function(ev){ reportGameError(ev.error||ev.message); });
 function animate(){
   requestAnimationFrame(animate);
-  update();
+  try{ update(); }catch(err){ reportGameError(err); }   // 예외가 나도 렌더는 계속 → 빨강 굳음 방지
   skyDome.position.copy(camera.position);   // 하늘이 늘 카메라를 감싸도록
   if(composer) composer.render(); else renderer.render(scene,camera);
 }
