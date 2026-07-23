@@ -4472,7 +4472,8 @@ function update(){
     if(!inHubT && !inMenuT && !won){
       stageTimeLeft -= 1/60;
       // 일정 높이마다 단계 돌파 → 시간 보너스 + 코인 (단계는 무한)
-      while(py >= nextStageY){
+      let __sg=0;
+      while(py >= nextStageY && __sg++ < 2000){   // 🔧 안전 가드: 무한 루프 방지(엘리베이터로 py 급상승 시 폭주 차단)
         const bonus = 12 + stageLevel*3;
         coins += bonus; saveCoins();
         stageTimeLeft += STAGE_TIME_BONUS;
@@ -5050,6 +5051,18 @@ window.addEventListener('pointerdown',initAudio);
 window.addEventListener('keydown',initAudio);
 document.getElementById('audio-ind').addEventListener('click',e=>{ initAudio(); toggleMute(); e.stopPropagation(); });
 
+// 🔧 진단: 게임 루프에서 예외 발생 시 화면 상단에 오류 내용을 표시(빨강 멈춤 원인 파악용). 최초 1회만, 탭하면 닫힘.
+window.addEventListener('error', function(ev){
+  try{
+    if(window.__errShown) return; window.__errShown=true;
+    const msg=(ev.error&&ev.error.stack)?ev.error.stack:((ev.message||'')+'  @'+(ev.filename||'')+':'+(ev.lineno||''));
+    const d=document.createElement('div');
+    d.style.cssText='position:fixed;left:6px;right:6px;top:6px;z-index:99999;background:rgba(30,0,0,.94);color:#ffdede;font:11px/1.4 monospace;padding:10px;border:1px solid #f55;border-radius:8px;white-space:pre-wrap;max-height:46vh;overflow:auto;';
+    d.textContent='⚠ 게임 오류(이 내용을 캡처해서 알려주세요):\n'+msg+'\n\n[탭하면 닫힘]';
+    d.onclick=function(){ d.remove(); window.__errShown=false; };
+    document.body.appendChild(d);
+  }catch(e){}
+});
 function animate(){
   requestAnimationFrame(animate);
   update();
