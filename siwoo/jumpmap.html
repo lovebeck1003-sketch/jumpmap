@@ -163,7 +163,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 </div>
 <div id="cp-hud" style="position:fixed;top:50%;left:14px;transform:translateY(-50%);color:rgba(255,255,255,0.55);font-size:11px;line-height:2.0;pointer-events:none;"></div>
 <div id="lava-hud" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);display:none;font-weight:800;font-size:15px;letter-spacing:1px;color:#ffce8a;text-shadow:0 0 10px rgba(255,80,20,0.9);pointer-events:none;"></div>
-<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인50)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
+<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 엘리베이터(시작·코인100)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
 <div id="flash"></div>
 <div id="rainveil"></div>
 <div id="settingsBtn" title="설정">⚙ 설정</div>
@@ -3609,7 +3609,7 @@ let coins=0, height=0, bestH=0;
 let endlessBest=0, deathFloor=-10;   // ♾️ 무한 모드: 전용 최고기록 + 플레이어를 따라오르는 죽음 바닥
 let stageLevel=1, stageTimeLeft=0, stageBest=0, nextStageY=0;   // ⏱️ 타임어택(무한): 현재 단계 / 남은시간 / 최고 단계 / 다음 단계 높이
 const STAGE_STEP=35, STAGE_TIME_BONUS=9, STAGE_INIT_TIME=25;    // 단계 높이 간격 / 돌파 시 시간보너스(초) / 시작 제한시간(초)
-const elevatorCost=50, elevatorRise=200;   // 코인 50개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
+const elevatorCost=100, elevatorRise=200;   // 코인 100개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
 const storageKey='SIWOO_bestH';
 const coinStorageKey='SIWOO_coins';
 const clearsKey='SIWOO_clears';
