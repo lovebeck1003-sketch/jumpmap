@@ -175,6 +175,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
   </div>
   <div style="display:flex;gap:8px;align-items:flex-start">
     <div class="stat"><div class="sl">LEVEL</div><div class="sv" id="lv">1</div></div>
+    <div class="stat"><div class="sl">DIFF</div><div class="sv" id="dv" style="color:#ffa06b">1</div></div>
     <div class="stat"><div class="sl">BEST</div><div class="sv" id="bv" style="color:#adf">0</div></div>
   </div>
 </div>
@@ -3361,25 +3362,35 @@ function makeCheckpoint(x,y,z){
 }
 
 // 발판 1칸 생성(무한 모드가 매 프레임 이어붙일 수 있도록 함수로 분리)
+// ── 난이도 곡선 추가: 발판 번호가 커질수록(=위로 갈수록) 끝없이 어려워진다 ──
+// ramp  : 0→1 구간은 기존 난이도 튜닝 그대로(수평·수직 간격, 발판 크기)
+// extra : ramp가 1을 넘은 뒤부터 0→1로 오르는 추가 난이도. 점근선이 1이라 끝없이 오르되 점점 완만해진다.
+//         발판을 더 좁게 / 위험·움직이는 발판을 더 많게 만들 뿐, 점프 거리는 늘리지 않는다(= 도달 불가능한 점프 방지).
+function diffRamp(i){
+  return (gameMode==='endless') ? i/170 : (gameMode==='stage') ? i/200 : i/180;
+}
+function diffExtra(ramp){ return 1 - 1/(1 + Math.max(0, ramp-1)*0.6); }
+function diffTier(i){ return Math.floor(diffRamp(i))+1; }
+
 function genPlatform(i){
   const prev=platforms[i-1];
   const endless = gameMode==='endless';
-  // 무한 모드는 난이도를 0.8에서 고정 / 타임어택은 단계가 오를수록 난이도↑
-  const difficulty = endless ? Math.min(0.8, i/150)
-    : gameMode==='stage' ? Math.min(0.9, i/200)
-    : Math.min(1, i / 180);
+  // 위로 갈수록 계속 어려워진다: ramp(0→1)는 기본 난이도, extra(0→1)는 그 뒤로도 계속 오르는 추가 난이도
+  const ramp = diffRamp(i);
+  const difficulty = Math.min(1, ramp);
+  const extra = diffExtra(ramp);
   const angle=Math.random()*Math.PI*2;
   const dist=2.3+Math.random()*2.0 + difficulty * 1.3;
   const x=prev.x+Math.cos(angle)*dist;
   const z=prev.z+Math.sin(angle)*dist;
   // 수직 간격은 난이도(상한 1)에 연동 — i에 무한 비례하면 후반이 점프 불가가 됨
   const y=prev.y+1.0+Math.random()*0.9 + difficulty*0.6;
-  const w=Math.max(1.8, 3.2 - difficulty*1.5 + Math.random()*1.4);
-  const d=Math.max(1.8, 2.8 - difficulty*1.1 + Math.random()*1.4);
+  const w=Math.max(1.5, 3.2 - difficulty*1.5 - extra*0.5 + Math.random()*1.4);   // 높이 오를수록 더 좁게
+  const d=Math.max(1.5, 2.8 - difficulty*1.1 - extra*0.5 + Math.random()*1.4);
 
   // 25칸마다 체크포인트 발판 — 무한 모드는 체크포인트 없음(순수 높이 도전)
   const isCheckpoint = !endless && (i % 25 === 0);
-  const moving = (gameMode==='normal'||gameMode==='stage') && !isCheckpoint && i>8 && Math.random() < 0.18 + difficulty * 0.22;
+  const moving = (gameMode==='normal'||gameMode==='stage') && !isCheckpoint && i>8 && Math.random() < 0.18 + difficulty * 0.22 + extra * 0.20;   // 높이 오를수록 흔들리는 발판 증가
 
   // 특수 발판 배정. 초반 5칸·움직임·체크포인트 발판은 제외(시작은 항상 안전).
   // 위험 발판(붕괴/용암)은 난이도에 비례해 늘고, 도움/중립 발판은 일정 비율.
@@ -3392,25 +3403,25 @@ function genPlatform(i){
     if(i>2 && !isCheckpoint) kind = (i%5===0) ? 'safe' : 'electric';
   } else if(i>5 && !moving && !isCheckpoint){
     const kr=Math.random();
-    const crumbleC = 0.03 + difficulty*0.07;   // 3% → 10%
-    const hazardC  = gameMode==='lava' ? 0 : (0.01 + difficulty*0.06);   // 1% → 7% (용암 모드는 바닥 용암이 위협이라 발판 용암 제거)
+    const crumbleC = 0.03 + difficulty*0.07 + extra*0.08;   // 3% → 10% → (높이 오를수록) 최대 18%
+    const hazardC  = gameMode==='lava' ? 0 : (0.01 + difficulty*0.06 + extra*0.07);   // 1% → 7% → 최대 14% (용암 모드는 바닥 용암이 위협이라 발판 용암 제거)
     let a=0;
     if      (kr < (a+=0.08)) kind='bounce';
     else if (kr < (a+=0.07)) kind='boost';
-    else if (kr < (a+=0.07)) kind='ice';
+    else if (kr < (a+=0.07+extra*0.05)) kind='ice';   // 높이 오를수록 미끄러운 얼음 증가
     else if (kr < (a+=0.06)){ kind='conveyor'; const ca=Math.random()*Math.PI*2; dirX=Math.cos(ca); dirZ=Math.sin(ca); }
     else if (kr < (a+=crumbleC)) kind='crumble';
     else if (kr < (a+=hazardC))  kind='hazard';
   }
 
-  const p={x,y,z,w,h:0.6,d,ci:i%PCOLS.length,moving,ox:x,prevX:x,amp:1.0+Math.random()*2.0,phase:Math.random()*Math.PI*2,kind,dirX,dirZ,cstate:'solid',ctimer:0,culled:false};
+  const p={x,y,z,w,h:0.6,d,ci:i%PCOLS.length,moving,ox:x,prevX:x,amp:1.0+Math.random()*(2.0+extra*1.6),phase:Math.random()*Math.PI*2,kind,dirX,dirZ,cstate:'solid',ctimer:0,culled:false};
   platforms.push(p); platMeshes.push(makePlat(p));
   if(isCheckpoint){
     const cpY = y + 0.4;
     checkpoints.push({x,y:cpY,z,activated:false});
     cpMeshes.push(makeCheckpoint(x,cpY,z));
   }
-  if(kind!=='hazard' && Math.random() < 0.5 - difficulty*0.18){
+  if(kind!=='hazard' && Math.random() < Math.max(0.20, 0.5 - difficulty*0.18 - extra*0.10)){   // 높이 오를수록 아이템이 귀해짐
     const r=Math.random();
     let type='coin';
     if(r < 0.12) type='fly';
@@ -3640,6 +3651,7 @@ let camX=0, camY=5, camZ=7;
 let camDist=7;   // 카메라 거리(휠 조절). 1.2 미만이면 1인칭
 let onGround=false, jumpsLeft=2;
 let standingOnIdx=-1; // 현재 서있는 발판 인덱스
+let curTier=1;        // 🔺 현재 난이도 구간(발판이 좁아지고 위험이 늘어나는 단계)
 let lastSafeX=0, lastSafeY=2, lastSafeZ=0; // 쉴드용 마지막 안전 위치
 let coins=0, height=0, bestH=0;
 let endlessBest=0, deathFloor=-10;   // ♾️ 무한 모드: 전용 최고기록 + 플레이어를 따라오르는 죽음 바닥
@@ -4192,6 +4204,7 @@ function updateHUD(){
   document.getElementById('hv').textContent=Math.max(0,Math.round(py));      // 현재 높이(떨어지면 같이 하락)
   document.getElementById('cv').textContent=coins;
   document.getElementById('lv').textContent=Math.floor(Math.max(0,height)/10)+1;
+  { const dEl=document.getElementById('dv'); if(dEl) dEl.textContent=curTier; }   // 🔺 현재 난이도 구간
   document.getElementById('bv').textContent=Math.round(gameMode==='endless'?endlessBest:bestH);   // 최고 높이(저장됨; 무한모드는 전용 기록)
   document.getElementById('cp-hud').innerHTML='체크포인트<br><b style="font-size:16px;color:#00ff88">'+(cpIdx+1)+'</b> / '+checkpoints.length;
   const hpEl=document.getElementById('hp-hud'); if(hpEl){ let hs=''; for(let i=0;i<maxHp;i++) hs+=(i<hp?'❤️':'🖤'); hpEl.textContent=hs; }   // ❤️ 체력 하트 표시
@@ -4216,7 +4229,7 @@ function restart(){
   yaw=0;pitch=0.3;
   camX=0;camY=5;camZ=7;
   onGround=false;jumpsLeft=2;
-  standingOnIdx=-1;
+  standingOnIdx=-1; curTier=1;
   lastSafeX=0;lastSafeY=2;lastSafeZ=0;
   coins = loadCoins(); height=0;
   eff={jump:0,glide:0,fly:0,slow:0};
@@ -4605,6 +4618,10 @@ function update(){
   if(paused) return;                       // 인게임 상점 열려 있으면 정지
   tick++;
   if((tick%60)===0) checkAchievements();   // 🏆 업적: 높이·등반·단계 기록을 1초마다 검사
+  if(onGround && standingOnIdx>0){                       // 🔺 난이도 구간 상승 알림
+    const nt=diffTier(standingOnIdx);
+    if(nt>curTier){ curTier=nt; showPickup('⚠️ 난이도 '+nt+'구간 — 발판이 더 좁고 위험해집니다'); doFlash('rgba(255,120,60,.26)'); }
+  }
   if(won){ updateFireworks(); return; }   // 승리 후엔 정지(불꽃놀이만 재생)
   if(eff.jump>0) eff.jump--;
   if(eff.fly>0) eff.fly--;
