@@ -136,6 +136,33 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 .um-card .um-buy.maxed{background:#2a4030;color:#7dff9b;border-color:rgba(120,255,150,0.4);opacity:1;cursor:default;}
 #upgradeModal .closebtn{padding:10px 32px;background:#4455ff;border:none;border-radius:10px;color:#fff;font-weight:bold;font-size:15px;cursor:pointer;font-family:inherit;}
 #upgradeModal .closebtn:hover{background:#5566ff;}
+/* ── 업적(도전과제) 시스템 추가 ── */
+#achv-btn{padding:10px 26px;background:linear-gradient(120deg,#bf8f3b,#c4593b);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:bold;cursor:pointer;font-family:inherit;}
+#achv-btn:hover{filter:brightness(1.15);}
+#achv-btn .ab-n{color:#ffe9a0;font-size:12px;}
+#achvModal{position:fixed;inset:0;background:rgba(14,8,2,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:26;}
+#achvModal h2{color:#ffd700;font-size:26px;letter-spacing:2px;text-shadow:0 0 16px rgba(255,190,60,0.5);}
+#achvModal .ac-sub{font-size:12px;color:#ffe9a0;text-align:center;line-height:1.7;}
+#achvModal .ac-list{width:min(660px,94vw);display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;padding:4px;}
+.ac-card{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.05);border:2px solid rgba(255,200,80,0.18);border-radius:12px;padding:9px 13px;}
+.ac-card.done{border-color:rgba(120,255,150,0.45);background:rgba(60,255,140,0.07);}
+.ac-card .ac-ic{font-size:26px;width:34px;text-align:center;filter:grayscale(1);opacity:0.45;}
+.ac-card.done .ac-ic{filter:none;opacity:1;}
+.ac-card .ac-info{flex:1;min-width:0;}
+.ac-card .ac-name{font-size:14px;color:#fff;font-weight:bold;}
+.ac-card .ac-desc{font-size:11px;color:#c9b48a;margin-top:2px;}
+.ac-bar{margin-top:5px;height:7px;border-radius:4px;background:rgba(255,255,255,0.1);overflow:hidden;}
+.ac-bar i{display:block;height:100%;background:linear-gradient(90deg,#ffb43b,#ffe98a);transition:width .3s;}
+.ac-card.done .ac-bar i{background:linear-gradient(90deg,#3bd77a,#a8ffcb);}
+.ac-card .ac-rw{min-width:94px;text-align:center;font-size:12px;font-weight:bold;color:#ffd700;line-height:1.5;}
+.ac-card.done .ac-rw{color:#7dff9b;}
+#achvModal .closebtn{padding:10px 32px;background:#4455ff;border:none;border-radius:10px;color:#fff;font-weight:bold;font-size:15px;cursor:pointer;font-family:inherit;}
+#achvModal .closebtn:hover{background:#5566ff;}
+#achv-pop{position:fixed;top:24%;left:50%;transform:translateX(-50%) scale(1);pointer-events:none;opacity:0;transition:opacity .3s, transform .3s;z-index:28;text-align:center;
+  background:rgba(24,14,2,0.88);border:2px solid rgba(255,200,60,0.6);border-radius:14px;padding:12px 26px;box-shadow:0 0 26px rgba(255,180,40,0.45);}
+#achv-pop .ap-t{font-size:11px;letter-spacing:3px;color:#ffd700;font-weight:bold;}
+#achv-pop .ap-n{font-size:20px;font-weight:bold;color:#fff;margin-top:3px;text-shadow:0 2px 6px #000;}
+#achv-pop .ap-r{font-size:12px;color:#ffe9a0;margin-top:3px;}
 </style>
 </head>
 <body>
@@ -256,6 +283,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
     <div class="shop-foot">구매한 소모품은 이번 판에만 들고 갑니다. 죽으면 사라져요 — 한 판에 거는 판돈!</div>
   </div>
   <button id="perma-btn">⚡ 영구 업그레이드</button>          <!-- 영구 업그레이드 버튼 추가 -->
+  <button id="achv-btn">🏆 업적 <span class="ab-n" id="achv-count">0/0</span></button>          <!-- 업적 버튼 추가 -->
   <button id="startbtn">시작하기 →</button>
 </div>
 <div id="winscreen">
@@ -279,6 +307,14 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
   <div class="um-list" id="um-list"></div>
   <button class="closebtn" id="upgrade-close">닫기 (Esc)</button>
 </div>
+<!-- 업적(도전과제) 모달 추가 -->
+<div id="achvModal">
+  <h2>🏆 업적</h2>
+  <div class="ac-sub">조건을 채우면 자동으로 달성되고 코인이 지급됩니다 · localStorage에 영구 저장<br>달성 <b id="ac-done" style="color:#7dff9b">0</b>/<b id="ac-all">0</b> · 보유 <b id="ac-coins" style="color:#ffd700">0</b> 코인</div>
+  <div class="ac-list" id="ac-list"></div>
+  <button class="closebtn" id="achv-close">닫기 (Esc)</button>
+</div>
+<div id="achv-pop"><div class="ap-t">ACHIEVEMENT</div><div class="ap-n" id="ap-name"></div><div class="ap-r" id="ap-rw"></div></div>
 
 <script>
 /**
@@ -3763,6 +3799,107 @@ function loadMissionsTotal(){ try{return Math.max(0,parseInt(localStorage.getIte
 function saveMissionsTotal(){ try{localStorage.setItem(missionsTotalKey,totalMissions);}catch(e){} }
 let totalMissions=loadMissionsTotal();
 
+// ── 업적(도전과제) 시스템 추가: 누적 통계 + 업적 정의 + 달성 판정 ──
+const statsKey='SIWOO_stats', achvKey='SIWOO_achv';
+function loadStats(){
+  try{const o=JSON.parse(localStorage.getItem(statsKey)||'{}');
+    return {runs:o.runs||0, deaths:o.deaths||0, coinsGot:o.coinsGot||0, cps:o.cps||0};}
+  catch(e){return {runs:0,deaths:0,coinsGot:0,cps:0};}
+}
+function saveStats(){ try{localStorage.setItem(statsKey,JSON.stringify(stats));}catch(e){} }
+let stats=loadStats();
+function loadAchv(){ try{return JSON.parse(localStorage.getItem(achvKey)||'{}')||{};}catch(e){return {};} }
+function saveAchv(){ try{localStorage.setItem(achvKey,JSON.stringify(achvDone));}catch(e){} }
+let achvDone=loadAchv();        // {key:true} = 이미 달성(보상 지급 완료)
+
+const ACHIEVEMENTS=[
+  {key:'first',    icon:'👟', name:'첫걸음',        desc:'점프맵을 한 판 시작',              goal:1,    reward:10,  val:()=>stats.runs},
+  {key:'h50',      icon:'🧗', name:'하늘 맛보기',   desc:'최고 높이 50 달성',                 goal:50,   reward:20,  val:()=>bestH},
+  {key:'h100',     icon:'⛰',  name:'구름 위로',     desc:'최고 높이 100 달성',                goal:100,  reward:40,  val:()=>bestH},
+  {key:'h200',     icon:'🚀', name:'성층권 돌파',   desc:'최고 높이 200 달성',                goal:200,  reward:90,  val:()=>bestH},
+  {key:'coin100',  icon:'🪙', name:'코인 수집가',   desc:'코인 100개 줍기(누적)',              goal:100,  reward:30,  val:()=>stats.coinsGot},
+  {key:'coin500',  icon:'💰', name:'코인 부자',     desc:'코인 500개 줍기(누적)',              goal:500,  reward:100, val:()=>stats.coinsGot},
+  {key:'coin2000', icon:'🏦', name:'코인 재벌',     desc:'코인 2000개 줍기(누적)',             goal:2000, reward:300, val:()=>stats.coinsGot},
+  {key:'clear1',   icon:'🏆', name:'정상 정복',     desc:'정상까지 클리어 1회',                 goal:1,    reward:50,  val:()=>clears},
+  {key:'clear5',   icon:'👑', name:'정복왕',        desc:'정상까지 클리어 5회',                 goal:5,    reward:150, val:()=>clears},
+  {key:'mis10',    icon:'📋', name:'미션 해결사',   desc:'미션 10개 완료(누적)',               goal:10,   reward:40,  val:()=>totalMissions},
+  {key:'mis50',    icon:'🎖', name:'미션 마스터',   desc:'미션 50개 완료(누적)',               goal:50,   reward:150, val:()=>totalMissions},
+  {key:'cp30',     icon:'🚩', name:'깃발 사냥꾼',   desc:'체크포인트 30개 찍기(누적)',        goal:30,   reward:40,  val:()=>stats.cps},
+  {key:'climb100', icon:'🪜', name:'맨몸 등반가',   desc:'엘리베이터 없이 높이 100 등반',      goal:100,  reward:60,  val:()=>bestClimb},
+  {key:'climb200', icon:'⛷',  name:'정예 등반가',   desc:'엘리베이터 없이 높이 200 등반',      goal:200,  reward:120, val:()=>bestClimb},
+  {key:'end150',   icon:'♾',  name:'무한의 벽',     desc:'무한 모드 최고 높이 150',            goal:150,  reward:100, val:()=>endlessBest},
+  {key:'stage10',  icon:'⏱',  name:'시간의 지배자', desc:'타임어택 10단계 돌파',               goal:10,   reward:100, val:()=>stageBest},
+  {key:'die50',    icon:'💀', name:'불굴의 의지',   desc:'50번 쓰러지고도 다시 도전',            goal:50,   reward:50,  val:()=>stats.deaths},
+  {key:'run100',   icon:'🔥', name:'백 판의 사나이', desc:'100판 플레이',                       goal:100,  reward:200, val:()=>stats.runs}
+];
+
+let achvQueue=[], achvOpen=false;
+function achvCount(){ let n=0; for(const a of ACHIEVEMENTS) if(achvDone[a.key]) n++; return n; }
+function achvVal(a){ try{ return a.val()||0; }catch(e){ return 0; } }
+function updateAchvBtn(){ const el=document.getElementById('achv-count'); if(el) el.textContent=achvCount()+'/'+ACHIEVEMENTS.length; }
+// 조건을 채운 업적을 달성 처리하고 코인 보상 지급(중복 지급 없음)
+// silent=true(게임 시작 시 소급 지급)면 팝업을 하나로 모아서 보여준다.
+function checkAchievements(silent){
+  const got=[];
+  for(const a of ACHIEVEMENTS){
+    if(achvDone[a.key]) continue;
+    if(achvVal(a) >= a.goal){ achvDone[a.key]=true; coins+=a.reward; got.push(a); }
+  }
+  if(!got.length) return;
+  saveAchv(); saveCoins(); updateAchvBtn();
+  if(silent && got.length>1){
+    const sum=got.reduce((s,a)=>s+a.reward,0);
+    achvQueue.push({icon:'🏆', name:'업적 '+got.length+'개 달성!', desc:'기존 기록으로 달성', reward:sum});
+  } else {
+    for(const a of got) achvQueue.push(a);
+  }
+  showNextAchv();
+  if(typeof updateHUD==='function') updateHUD();
+  if(achvOpen) renderAchievements();
+}
+function showNextAchv(){
+  const el=document.getElementById('achv-pop');
+  if(!el || el._busy || !achvQueue.length) return;
+  const a=achvQueue.shift();
+  el._busy=true;
+  document.getElementById('ap-name').textContent=a.icon+' '+a.name;
+  document.getElementById('ap-rw').textContent=a.desc+'  ·  +'+a.reward+' 코인';
+  el.style.opacity='1'; el.style.transform='translateX(-50%) scale(1.06)';
+  if(typeof doFlash==='function') doFlash('rgba(255,190,60,.3)');
+  if(typeof sfxCoin==='function') sfxCoin();
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>{
+    el.style.opacity='0'; el.style.transform='translateX(-50%) scale(1)';
+    el._busy=false;
+    setTimeout(showNextAchv, 340);
+  }, 2200);
+}
+function renderAchievements(){
+  document.getElementById('ac-done').textContent=achvCount();
+  document.getElementById('ac-all').textContent=ACHIEVEMENTS.length;
+  document.getElementById('ac-coins').textContent=coins;
+  const list=document.getElementById('ac-list');
+  list.innerHTML='';
+  // 미달성을 위로(진행률 높은 순), 달성한 건 아래로
+  ACHIEVEMENTS.map(a=>{
+    const v=achvVal(a);
+    return {a, v, ok:!!achvDone[a.key], p:Math.max(0,Math.min(1, v/a.goal))};
+  }).sort((x,y)=> (x.ok!==y.ok) ? (x.ok?1:-1) : (y.p-x.p))
+  .forEach(o=>{
+    const a=o.a, cur=Math.min(Math.floor(o.v), a.goal);
+    const d=document.createElement('div');
+    d.className='ac-card'+(o.ok?' done':'');
+    d.innerHTML='<div class="ac-ic">'+a.icon+'</div>'+
+      '<div class="ac-info"><div class="ac-name">'+a.name+'</div>'+
+      '<div class="ac-desc">'+a.desc+' — '+cur+' / '+a.goal+'</div>'+
+      '<div class="ac-bar"><i style="width:'+Math.round(o.p*100)+'%"></i></div></div>'+
+      '<div class="ac-rw">'+(o.ok?'✔ 달성<br>+'+a.reward+' 지급':'+'+a.reward+' 💰')+'</div>';
+    list.appendChild(d);
+  });
+}
+function openAchievements(){ checkAchievements(); achvOpen=true; renderAchievements(); document.getElementById('achvModal').style.display='flex'; }
+function closeAchievements(){ achvOpen=false; document.getElementById('achvModal').style.display='none'; }
+
 // ---- 클리어 보상: 불꽃놀이 + 승리 화면 ----
 let fireworks=[];
 function spawnFireworks(cx,cy,cz){
@@ -3804,6 +3941,7 @@ function winGame(){
   const bonus=firstClear?200:100;
   coins+=bonus; saveCoins();
   clears++; saveClears();
+  checkAchievements();                    // 🏆 업적: 클리어 횟수
   doFlash('rgba(255,215,0,.55)');
   spawnFireworks(px, py+2, pz);
   const top=platforms[platforms.length-1];
@@ -3951,6 +4089,7 @@ function doJump(){
 document.getElementById('shop-close').addEventListener('click', closeShop);
 document.addEventListener('keydown',e=>{
   if(document.getElementById('mainmenu').style.display!=='none') return;   // 메인 메뉴에선 게임 입력 무시
+  if(achvOpen){ if(e.code==='Escape') closeAchievements(); e.preventDefault(); return; }        // 🏆 업적 모달 열림 시 입력 차단
   if(upgradeOpen){ if(e.code==='Escape') closeUpgrades(); e.preventDefault(); return; }   // 영구 업그레이드 모달 열림 시 입력 차단
   if(e.code==='KeyN'){           // 모드 변경 — 메인 메뉴로
     if(paused) closeShop();
@@ -4218,6 +4357,7 @@ function completeMission(m){
   m.done=true;
   coins+=m.reward; saveCoins();
   totalMissions++; saveMissionsTotal();
+  checkAchievements();                    // 🏆 업적: 누적 미션 수
   showMissionComplete(m.reward);
   if(typeof sfxCoin==='function') sfxCoin();
   updateHUD(); updateInv();
@@ -4264,6 +4404,7 @@ function beginRun(){
   loadout={glide:0,jump:0,fly:0,slow:0,revive:0,shield:0}; saveLoadout();
   resetMissionRun(); initMissions();      // 미션 시스템: 판 시작 시 랜덤 미션 3개 생성
   usedElevatorThisRun=false;              // 🛗 새 판 시작 — '직접 등반' 판정 초기화
+  stats.runs++; saveStats(); checkAchievements();   // 🏆 업적: 누적 플레이 판 수
   if(gameMode==='stage'){ stageLevel=1; nextStageY=STAGE_STEP; stageTimeLeft=STAGE_INIT_TIME; }   // ⏱️ 새 타임어택 시작(1단계부터)
   document.getElementById('overlay').style.display='none';
   updateInv(); updateHUD();
@@ -4273,6 +4414,8 @@ function beginRun(){
 // 완전 사망(체크포인트/부활권 모두 없음) → 월드 리셋 후 허브로 복귀해 재보급
 function gameOver(){
   lastRunHeight=Math.round(Math.max(0,height));
+  stats.deaths++; saveStats();            // 🏆 업적: 누적 사망 수
+  checkAchievements();
   const endlessNow = gameMode==='endless';
   const stageNow = gameMode==='stage';
   const stageReached = stageLevel;
@@ -4290,6 +4433,7 @@ function gameOver(){
 function stageTimeout(){
   doFlash('rgba(255,60,60,.7)'); sfxDeath();
   const reached=stageLevel;
+  stats.deaths++; saveStats(); checkAchievements();   // 🏆 업적: 누적 사망 수
   lastRunHeight=Math.round(Math.max(0,height));
   restart();                          // 새 판(1단계부터)
   if(document.exitPointerLock) document.exitPointerLock();
@@ -4340,6 +4484,11 @@ document.getElementById('tomenu').addEventListener('click', showMainMenu);
 // 영구 업그레이드 버튼 이벤트 추가
 document.getElementById('perma-btn').addEventListener('click', openUpgrades);
 document.getElementById('upgrade-close').addEventListener('click', closeUpgrades);
+// ── 업적 버튼 연결 + 시작 시 상태 반영(기존 기록으로 이미 달성한 업적 소급 지급) ──
+document.getElementById('achv-btn').addEventListener('click', openAchievements);
+document.getElementById('achv-close').addEventListener('click', closeAchievements);
+updateAchvBtn();
+checkAchievements(true);
 showMainMenu();   // 로드 시 메인 메뉴부터 시작
 
 // 낙하/사망 공용 처리 (추락 + 용암 발판이 공유)
@@ -4455,6 +4604,7 @@ function resolveCollisions(){
 function update(){
   if(paused) return;                       // 인게임 상점 열려 있으면 정지
   tick++;
+  if((tick%60)===0) checkAchievements();   // 🏆 업적: 높이·등반·단계 기록을 1초마다 검사
   if(won){ updateFireworks(); return; }   // 승리 후엔 정지(불꽃놀이만 재생)
   if(eff.jump>0) eff.jump--;
   if(eff.fly>0) eff.fly--;
@@ -4696,7 +4846,7 @@ function update(){
     const dx=px-it.x, dy=(py+PFULL/2)-(it.y+bob), dz=pz-it.z;
     if(Math.abs(dx)<0.9&&Math.abs(dy)<1.1&&Math.abs(dz)<0.9){
       it.alive=false; scene.remove(itemMeshes[i]);
-      if(it.type==='coin'){coins++; mrun.coins++; saveCoins(); doFlash('rgba(255,220,0,.22)');showPickup('코인 획득'); sfxCoin(); burst(it.x,it.y,it.z, 14, 1.0,0.85,0.2);}   // mrun.coins: 미션 진행
+      if(it.type==='coin'){coins++; mrun.coins++; saveCoins(); stats.coinsGot++; saveStats(); checkAchievements(); doFlash('rgba(255,220,0,.22)');showPickup('코인 획득'); sfxCoin(); burst(it.x,it.y,it.z, 14, 1.0,0.85,0.2);}   // mrun.coins: 미션 진행
       else if(it.type==='fly'){inv.fly++;showPickup('비행 장치 획득');}
       else if(it.type==='jump'){inv.jump++;showPickup('점프 장치 획득');}
       else if(it.type==='glide'){inv.glide++;showPickup('글라이드 획득 - Q로 사용');}
@@ -4718,6 +4868,7 @@ function update(){
     if(Math.abs(dx)<1.2&&Math.abs(dy)<2.0&&Math.abs(dz)<1.2){
       cp.activated=true; cpIdx=ci;
       mrun.cps++;                                  // 미션: 체크포인트 찍기
+      stats.cps++; saveStats(); checkAchievements();   // 🏆 업적: 누적 체크포인트
       // 체크포인트 보상 증가 업그레이드: 도달 시 코인 추가 지급
       const cpb=(upgrades.cpreward||0)*5;
       if(cpb>0){ coins+=cpb; saveCoins(); }
