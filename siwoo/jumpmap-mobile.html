@@ -106,6 +106,16 @@ body.touch #audio-ind{bottom:auto;top:74px;left:16px;font-size:26px;}
 .mode-card .mc-badge{font-size:11px;padding:4px 14px;border-radius:20px;background:rgba(120,160,255,0.2);color:#bcd0ff;letter-spacing:1px;}
 .mode-card.locked{opacity:0.5;cursor:not-allowed;filter:grayscale(0.5);}
 .mode-card.locked:hover{transform:none;border-color:rgba(120,150,220,0.3);box-shadow:none;}
+/* 세로 화면이면 게임을 가리고 회전 안내 — orientation.lock 을 지원하지 않는 브라우저(iOS Safari 등) 대비 */
+#rotate-hint{display:none;}
+@media (orientation:portrait){
+  body.touch #rotate-hint{display:flex;position:fixed;inset:0;z-index:99998;background:#04061b;color:#cfe0ff;
+    flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;font-family:inherit;}
+  body.touch #rotate-hint .ph{font-size:64px;animation:rot-turn 1.8s ease-in-out infinite;}
+  body.touch #rotate-hint .rt{font-size:19px;font-weight:700;letter-spacing:.5px;}
+  body.touch #rotate-hint .rs{font-size:13px;opacity:.65;}
+}
+@keyframes rot-turn{0%,60%{transform:rotate(0deg);}80%,100%{transform:rotate(90deg);}}
 body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio-ind,body.menu #freehint,body.menu #mission-hud{display:none!important;}
 #tomenu{position:fixed;top:14px;left:16px;z-index:11;padding:7px 16px;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.2);
   border-radius:20px;color:#cfe0ff;font-size:12px;cursor:pointer;font-family:inherit;}
@@ -204,6 +214,8 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
     <label class="set-row"><span>🚀 비행 (Z)</span><input type="checkbox" data-gs="fly"></label>
     <label class="set-row"><span>🐢 슬로우 (C)</span><input type="checkbox" data-gs="slow"></label>
     <label class="set-row"><span>🛗 엘리베이터 (R)</span><input type="checkbox" data-gs="elev"></label>
+    <div class="set-sec">환경</div>
+    <label class="set-row"><span>🌧️ 비 효과</span><input type="checkbox" data-gs="rain"></label>
     <button id="setClose">닫기</button>
   </div>
 </div>
@@ -2436,7 +2448,19 @@ function closeSettings(){ const m=document.getElementById('settingsModal'); if(m
 })();
 /* -- fullscreen (mobile) -- */
 function fsEl(){ return document.fullscreenElement || document.webkitFullscreenElement; }
-function reqFS(){ const e=document.documentElement; const fn=e.requestFullscreen||e.webkitRequestFullscreen; if(fn && !fsEl()){ try{ fn.call(e); }catch(err){} } }
+function lockLandscape(){
+  // 화면 방향 고정은 대부분의 브라우저에서 '전체화면 상태 + 사용자 제스처' 안에서만 허용된다.
+  // 지원하지 않는 브라우저(iOS Safari)에서는 조용히 실패하고 #rotate-hint 안내가 대신 뜬다.
+  try{
+    const so=screen.orientation;
+    if(so && so.lock) so.lock('landscape').catch(()=>{});
+  }catch(err){}
+}
+function reqFS(){
+  const e=document.documentElement; const fn=e.requestFullscreen||e.webkitRequestFullscreen;
+  if(fn && !fsEl()){ try{ const r=fn.call(e); if(r&&r.then) r.then(lockLandscape,()=>{}); else lockLandscape(); }catch(err){} }
+  else lockLandscape();
+}
 function exitFS(){ const fn=document.exitFullscreen||document.webkitExitFullscreen; if(fn && fsEl()){ try{ fn.call(document); }catch(err){} } }
 function toggleFS(){ if(fsEl()) exitFS(); else reqFS(); }
 (function initFS(){
@@ -3093,8 +3117,16 @@ function updateMeteors(t){
   }
 }
 
+// 고도 0~1 환산 기준 높이.
+// 일반 모드는 코스 꼭대기(고정)를 쓰면 되지만, 무한·타임어택은 꼭대기가 늘 머리 위 60에 따라붙어서
+// 그대로 쓰면 t가 진행도가 아니라 그냥 계속 커지는 값이 된다(py 26쯤에 벌써 우주가 돼버림).
+// 그래서 이 모드들은 일반 모드 꼭대기(≈354)를 고정 기준으로 삼아 같은 속도로 지상→우주가 되게 한다.
+const SKY_REF_Y = 354;
+function skyRefTop(){
+  return (gameMode==='endless'||gameMode==='stage') ? SKY_REF_Y : platforms[platforms.length-1].y;
+}
 function updateSky(){
-  const topY = platforms[platforms.length-1].y;
+  const topY = skyRefTop();
   const t = Math.min(1, Math.max(0, py / (topY*0.9)));   // 0=지상, 1=우주(코스 거의 꼭대기)
   const cl=x=>Math.max(0,Math.min(1,x));
   const ramp=(a,b,c)=> t<0.5 ? new THREE.Color(a).lerp(new THREE.Color(b), t/0.5)
@@ -3114,16 +3146,16 @@ function updateSky(){
   skyMat.uniforms.bot.value.copy(grdC).convertSRGBToLinear();
   scene.fog.color.copy(midC).convertSRGBToLinear();
 
-  // 산맥: 낮을 때만 (t<0.3)
-  const mOp=cl(1 - t/0.3);
-  mountainGroup.visible = mOp>0.01;
+  // 산맥·초원·바다는 높이 올라가도 사라지지 않는다(사용자 요청).
+  // 예전에는 t가 0.3을 넘으면 서서히 없어져서, 아래를 내려다보면 땅이 통째로 비어 보였다.
+  const mOp=1;
+  mountainGroup.visible = true;
   mountainGroup.children.forEach(m=>{ m.material.opacity=mOp; });
-  // 초원 계곡: 지상에서만 (t<0.34)
-  const landOp=cl(1 - t/0.34);
-  landGroup.visible = landOp>0.01;
-  if(landOp>0.01) landGroup.traverse(o=>{ if(o.isMesh) o.material.opacity=landOp; });
-  // 비: 완전 제거(사용자 요청) — 항상 비활성
-  if(false){
+  const landOp=1;
+  landGroup.visible = true;
+  landGroup.traverse(o=>{ if(o.isMesh) o.material.opacity=landOp; });
+  // 비: 지구권(t<0.3)에서만 가끔 — 토글식 날씨(설정에서 끌 수 있음)
+  if(t<0.3 && GS.rain!==false){
     if(--rainTimer<=0){
       rainTarget = rainTarget>0.5 ? 0 : 1;
       rainTimer  = rainTarget>0.5 ? (900+Math.random()*600|0) : (9000+Math.random()*4200|0);  // 비 15~25초 / 갬 약 150~220초(3분 간격)
@@ -3144,12 +3176,12 @@ function updateSky(){
     rainMat.opacity = Math.min(1,rainLevel)*0.85*cl(1-t/0.3);
     if(rainVeilEl) rainVeilEl.style.opacity = Math.min(1,rainLevel)*0.5*cl(1-t/0.3);
   }
-  // 바다 + 윤슬: 지상에서만(t<0.4), 수평선 색은 지평선 헤이즈와 맞춤
+  // 바다 + 윤슬: 산·초원과 같이 계속 남긴다. 수평선 색은 지평선 헤이즈와 맞춤
   seaUniforms.uTime.value = tick*0.016;
   seaUniforms.uCam.value.copy(camera.position);
   seaUniforms.uSky.value.copy(grdC).convertSRGBToLinear();
-  const seaOp = cl(1 - t/0.4);
-  sea.visible = seaOp>0.01;
+  const seaOp = 1;
+  sea.visible = true;
   seaUniforms.uOpacity.value = seaOp;
   // 풍경 태양: 지평선에 낮게(SUN_DIR 방향), 카메라 따라 멀리 배치 → 늘 수평선에
   const sunOp = cl(1 - t/0.45);
@@ -3268,10 +3300,29 @@ let elevSX=0,elevSY=0,elevSZ=0, elevDX=0,elevDY=0,elevDZ=0, elevT=0, elevDur=1;
 const elevatorSpeed=0.35;   // 상승 속도(높을수록 빠름)
 
 function clearScene(){
-  platMeshes.forEach(m=>{scene.remove(m);m.geometry.dispose(); if(m.userData.marker) m.userData.marker.material.dispose();});
-  itemMeshes.forEach(m=>{scene.remove(m);m.geometry.dispose();});
+  // ⚠ platMeshes 에는 null 이 섞여 있다: 무한·타임어택에서 아래로 멀어진 발판은 메시만 정리하고
+  //    platforms 와의 인덱스를 맞추려고 그 자리에 null 을 남기기 때문(extendEndless 참고).
+  //    forEach 는 명시적 null 을 건너뛰지 않으므로 반드시 확인하고 지나가야 한다.
+  platMeshes.forEach(m=>{
+    if(!m) return;
+    scene.remove(m);
+    if(m.geometry) m.geometry.dispose();
+    if(m.material) m.material.dispose();
+    if(m.userData && m.userData.marker && m.userData.marker.material) m.userData.marker.material.dispose();
+  });
+  itemMeshes.forEach(m=>{
+    if(!m) return;
+    scene.remove(m);
+    if(m.geometry) m.geometry.dispose();
+    if(m.material) m.material.dispose();
+  });
   disposeElevator();   // 구름/산/지구/별 등 배경은 1회 생성 영구 유지(리셋 시 제거 안 함)
-  cpMeshes.forEach(entry=>{scene.remove(entry.group);entry.mat.dispose();entry.fmat.dispose();});
+  cpMeshes.forEach(entry=>{
+    if(!entry || !entry.group) return;
+    scene.remove(entry.group);
+    if(entry.mat) entry.mat.dispose();
+    if(entry.fmat) entry.fmat.dispose();
+  });
   platMeshes=[];itemMeshes=[];platforms=[];items=[];
   checkpoints=[];cpMeshes=[];cpIdx=-1;
   elevatorActive=false; elevatorTargetY=0; elevatorDestIdx=-1; elevatorY=0;
@@ -3451,13 +3502,20 @@ function extendEndless(){
   while(platforms[platforms.length-1].y < py + 60 && guard++ < 30){
     genPlatform(platforms.length);
   }
-  // 죽음 바닥: 플레이어를 따라 상승(단조 증가). 이 아래로 떨어지면 사망.
-  deathFloor = Math.max(deathFloor, py - 40);
-  // 죽음 바닥보다 확실히 아래인 발판은 메시 정리(데이터는 인덱스 안정성 위해 남김)
+  // 죽음 바닥: 플레이어를 따라 상승(단조 증가 — 절대 내려가지 않음). 이 아래로 떨어지면 사망.
+  // 예전엔 py-40 에 딱 붙어 즉시 따라붙어서, 한 번 미끄러지면 아래 발판에 닿기도 전에 죽었다.
+  // ① 간격을 120 으로 넓혀 실수해도 아래 발판에서 다시 오를 기회를 준다.
+  // ② 목표치로 곧장 점프하지 않고 천천히 차오르게 해서, 빠르게 오른 직후 갑자기 죽는 일을 막는다.
+  const dfTarget = py - 120;
+  if(dfTarget > deathFloor) deathFloor += Math.min(dfTarget - deathFloor, 0.06);
+  // 아래쪽 발판 메시 정리(데이터는 인덱스 안정성 위해 남김).
+  // 예전에는 죽음선 6 아래부터 지워서, 내려다보면 발판이 눈앞에서 사라진 것처럼 보였다.
+  // 죽음선 아래는 어차피 갈 수 없는 구간이지만 '보이기는 해야' 하므로 여유를 크게 둔다.
+  const CULL_BELOW = 150;
   for(let i=0;i<platforms.length;i++){
     const p=platforms[i];
     if(p.culled || i===standingOnIdx) continue;
-    if(p.y < deathFloor - 6){
+    if(p.y < deathFloor - CULL_BELOW){
       const m=platMeshes[i];
       if(m){
         scene.remove(m);
@@ -3466,6 +3524,21 @@ function extendEndless(){
         platMeshes[i]=null;
       }
       p.culled=true;
+    }
+  }
+  // 아이템도 같이 정리 — 안 하면 발판만 사라지고 코인·아이템이 허공에 떠 있게 된다.
+  for(let i=0;i<items.length;i++){
+    const it=items[i];
+    if(!it.alive) continue;
+    if(it.y < deathFloor - CULL_BELOW){
+      it.alive=false;                       // 먹은 것과 같은 처리(배열 자리는 인덱스 유지를 위해 남김)
+      const m=itemMeshes[i];
+      if(m){
+        scene.remove(m);
+        if(m.geometry) m.geometry.dispose();
+        if(m.material) m.material.dispose();
+        itemMeshes[i]=null;
+      }
     }
   }
 }
@@ -3878,7 +3951,7 @@ function showNextAchv(){
   document.getElementById('ap-rw').textContent=a.desc+'  ·  +'+a.reward+' 코인';
   el.style.opacity='1'; el.style.transform='translateX(-50%) scale(1.06)';
   if(typeof doFlash==='function') doFlash('rgba(255,190,60,.3)');
-  if(typeof sfxCoin==='function') sfxCoin();
+  if(typeof sfxAchv==='function') sfxAchv();
   clearTimeout(el._t);
   el._t=setTimeout(()=>{
     el.style.opacity='0'; el.style.transform='translateX(-50%) scale(1)';
@@ -3955,6 +4028,7 @@ function winGame(){
   clears++; saveClears();
   checkAchievements();                    // 🏆 업적: 클리어 횟수
   doFlash('rgba(255,215,0,.55)');
+  if(typeof sfxWin==='function') sfxWin();
   spawnFireworks(px, py+2, pz);
   const top=platforms[platforms.length-1];
   spawnFireworks(top.x, top.y+2.5, top.z);
@@ -4345,7 +4419,7 @@ function buyUpgrade(key){
   if(coins<price) return;
   coins-=price; saveCoins();
   upgrades[key]=lvl+1; saveUpgrades();
-  if(typeof sfxCoin==='function') sfxCoin();
+  if(typeof sfxBuy==='function') sfxBuy();
   renderUpgrades(); renderShop(); updateHUD(); updateInv();
 }
 function openUpgrades(){ upgradeOpen=true; renderUpgrades(); document.getElementById('upgradeModal').style.display='flex'; }
@@ -4469,6 +4543,7 @@ function showMainMenu(){
   if(document.exitPointerLock) document.exitPointerLock();
 }
 function enterMode(mode){
+  if(document.body.classList.contains('touch')) reqFS();   // 게임 시작 = 전체화면 + 가로 고정
   gameMode=mode;
   if(mode==='stage') stageLevel=1;   // ⏱️ 타임어택은 항상 1단계부터
   restart();                 // 모드 반영 풀 리셋(genMap+위치+cpUsesLeft 등)
@@ -4710,7 +4785,7 @@ function update(){
       if(p.cstate==='breaking'){
         mesh.position.y=p.y+Math.sin(tick*0.9)*0.06;       // 무너지기 직전 흔들림
         mesh.material.opacity=0.7+Math.sin(tick*0.9)*0.3;   // 깜빡임
-        if(p.ctimer<=0){ p.cstate='gone'; p.ctimer=CRUMBLE_GONE; mesh.castShadow=false; }
+        if(p.ctimer<=0){ p.cstate='gone'; p.ctimer=CRUMBLE_GONE; mesh.castShadow=false; sfxCollapse(Math.hypot(px-p.x, py-p.y, pz-p.z)); }
       } else if(p.cstate==='gone'){
         mesh.position.y=p.y;
         const reborn=p.ctimer<30;                           // 재생성 직전 0.5초간 차오름
@@ -4814,11 +4889,11 @@ function update(){
       sfxJump(1.3); burst(px,py,pz, 12, 0.4,1.0,0.6);
     } else if(sp.kind==='boost'){
       jumpsLeft=2; if(eff.jump<90) eff.jump=90; // 약 1.5초 강력 점프 충전
-      if(!mrun.boostSet.has(standingOnIdx)){ mrun.boostSet.add(standingOnIdx); mrun.boost++; }   // 미션: 부스트 발판 밟기(발판당 1회)
+      if(!mrun.boostSet.has(standingOnIdx)){ mrun.boostSet.add(standingOnIdx); mrun.boost++; sfxBoost(); }   // 미션: 부스트 발판 밟기(발판당 1회)
     } else if(sp.kind==='safe'){
       if(!mrun.safeSet.has(standingOnIdx)){ mrun.safeSet.add(standingOnIdx); mrun.safe++; }       // 미션: 전기 안전 발판 밟기(발판당 1회)
     } else if(sp.kind==='crumble'){
-      if(sp.cstate==='solid'){ sp.cstate='breaking'; sp.ctimer = gameMode==='quake' ? 50 : CRUMBLE_BREAK; mrun.crumble++; if(gameMode!=='quake') showPickup('발판이 무너진다!'); }   // 미션: 붕괴 발판 밟기
+      if(sp.cstate==='solid'){ sp.cstate='breaking'; sp.ctimer = gameMode==='quake' ? 50 : CRUMBLE_BREAK; mrun.crumble++; sfxCrack(); if(gameMode!=='quake') showPickup('발판이 무너진다!'); }   // 미션: 붕괴 발판 밟기
     } else if(sp.kind==='hazard'){
       // ☠ 데미지 발판: 즉사 대신 체력 1칸 감소(잠시 무적). 체력 0이면 사망 처리.
       if(hurtInvuln<=0){
@@ -4883,7 +4958,7 @@ function update(){
     if(cp.activated) continue;
     const dx=px-cp.x, dy=py-cp.y, dz=pz-cp.z;
     if(Math.abs(dx)<1.2&&Math.abs(dy)<2.0&&Math.abs(dz)<1.2){
-      cp.activated=true; cpIdx=ci;
+      cp.activated=true; cpIdx=ci; sfxCheckpoint();
       mrun.cps++;                                  // 미션: 체크포인트 찍기
       stats.cps++; saveStats(); checkAchievements();   // 🏆 업적: 누적 체크포인트
       // 체크포인트 보상 증가 업그레이드: 도달 시 코인 추가 지급
@@ -5191,9 +5266,52 @@ function sfxZap(){   // 찌릿! 고주파 + 노이즈 크랙
   const g=actx.createGain(); g.gain.value=0.12;
   s.connect(f); f.connect(g); g.connect(masterGain); s.start(now);
 }
+// ── 추가 효과음: 붕괴 / 체크포인트 / 부스트 / 업적 / 구매 / 클리어 ──
+// noise(): 짧은 감쇠 노이즈 한 방(부서지는 소리 재료). filt/cut 으로 음색을 잡는다.
+function noise(dur, vol, filt, cut){
+  if(!actx || actx.state!=='running' || audioMuted) return;
+  const now=actx.currentTime, n=Math.max(1,(actx.sampleRate*dur)|0);
+  const buf=actx.createBuffer(1,n,actx.sampleRate), dd=buf.getChannelData(0);
+  for(let i=0;i<n;i++) dd[i]=(Math.random()*2-1)*Math.pow(1-i/n,2);
+  const s=actx.createBufferSource(); s.buffer=buf;
+  const f=actx.createBiquadFilter(); f.type=filt||'lowpass'; f.frequency.value=cut||900;
+  const g=actx.createGain(); g.gain.value=vol;
+  s.connect(f); f.connect(g); g.connect(masterGain); s.start(now);
+}
+// 밟는 순간 "쩌적" — 무너지기 전 경고
+function sfxCrack(){ noise(0.13, 0.11, 'bandpass', 1500); blip(300, 0.10, 'square', 0.05, 220); }
+// 실제로 무너져 내리는 순간 — 플레이어와 가까울 때만 울린다(멀리서 무너지는 발판 소리 도배 방지)
+function sfxCollapse(dist){
+  const d=(dist==null)?0:dist;
+  if(d>26) return;
+  const v=1-Math.min(1,d/26);
+  noise(0.34, 0.16*v, 'lowpass', 620);
+  blip(150, 0.28, 'sine', 0.10*v, 55);
+}
+// 체크포인트 도달 — 밝게 올라가는 3음
+function sfxCheckpoint(){
+  blip(523.25, 0.13, 'triangle', 0.13, 0);                          // C5
+  setTimeout(()=>blip(659.25, 0.13, 'triangle', 0.13, 0), 90);      // E5
+  setTimeout(()=>blip(987.77, 0.26, 'triangle', 0.14, 0), 180);     // B5
+}
+// 부스트 발판 충전 — 위로 훅 솟는 소리
+function sfxBoost(){ blip(300, 0.26, 'sawtooth', 0.10, 1500); noise(0.16, 0.05, 'highpass', 1800); }
+// 업적 달성 — 팡파레(코인 소리보다 확실히 구별되게)
+function sfxAchv(){
+  const notes=[523.25, 659.25, 783.99, 1046.5];   // C-E-G-C 아르페지오
+  notes.forEach((f,i)=> setTimeout(()=>blip(f, i===3?0.42:0.14, 'square', 0.10, 0), i*85));
+}
+// 상점 구매 — 짧고 만족스러운 '띠링'
+function sfxBuy(){ blip(660,0.09,'triangle',0.11,0); setTimeout(()=>blip(990,0.16,'triangle',0.11,0), 70); }
+// 정상 클리어 — 긴 팡파레
+function sfxWin(){
+  const seq=[[523.25,0],[659.25,120],[783.99,240],[1046.5,360],[1318.5,480],[1046.5,700]];
+  seq.forEach(([f,t],i)=> setTimeout(()=>blip(f, i>=4?0.55:0.18, 'triangle', 0.13, 0), t));
+  setTimeout(()=>{ blip(1567.98, 0.7, 'sine', 0.10, 0); }, 700);
+}
 function updateAudio(){
   if(!actx||actx.state!=='running') return;
-  const topY=platforms[platforms.length-1].y;
+  const topY=skyRefTop();                              // 하늘 연출과 같은 기준(무한·타임어택은 고정 높이)
   const t=Math.min(1,Math.max(0,py/(topY*0.9)));
   const now=actx.currentTime;
   // 지상=바람+새소리 → 우주=이더리얼 패드 크로스페이드
@@ -5240,5 +5358,10 @@ function animate(){
 }
 animate();
 </script>
+<div id="rotate-hint">
+  <div class="ph">📱</div>
+  <div class="rt">가로로 돌려주세요</div>
+  <div class="rs">이 게임은 가로 화면에서 플레이합니다</div>
+</div>
 </body>
 </html>

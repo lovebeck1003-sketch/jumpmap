@@ -3,7 +3,7 @@
   "short_name": "JumpMap",
   "start_url": "./index.html",
   "display": "fullscreen",
-  "orientation": "any",
+  "orientation": "landscape",
   "background_color": "#000000",
   "theme_color": "#04061b",
   "icons": []
