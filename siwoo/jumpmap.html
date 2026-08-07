@@ -191,7 +191,7 @@ body.menu #hud,body.menu #inv,body.menu #ctrl,body.menu #cp-hud,body.menu #audio
 </div>
 <div id="cp-hud" style="position:fixed;top:50%;left:14px;transform:translateY(-50%);color:rgba(255,255,255,0.55);font-size:11px;line-height:2.0;pointer-events:none;"></div>
 <div id="lava-hud" style="position:fixed;top:64px;left:50%;transform:translateX(-50%);display:none;font-weight:800;font-size:15px;letter-spacing:1px;color:#ffce8a;text-shadow:0 0 10px rgba(255,80,20,0.9);pointer-events:none;"></div>
-<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R:100칸(50코인)·T:200칸(100코인) 엘리베이터<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
+<div id="ctrl">WASD: 이동 · SPACE: 점프<br>Shift: 앉기 · Ctrl: 달리기<br>Q: 글라이드 · E: 점프 · C: 슬로우<br>Z: 비행 · R: 200칸 엘리베이터(100코인)<br>B: 상점 · V: 자유 시점 · M: 사운드 · N: 모드</div>
 <div id="flash"></div>
 <div id="rainveil"></div>
 <div id="settingsBtn" title="설정">⚙ 설정</div>
@@ -3272,6 +3272,11 @@ function makeMarkerSprite(kind){
 const ICOLS={coin:0xffdd00,fly:0x00aaff,jump:0xff6600,glide:0x88ffcc,slow:0x88bbff,heart:0xff4466};
 
 let platforms=[], items=[], platMeshes=[], itemMeshes=[];
+// ♾️ 무한·타임어택: platforms 배열은 인덱스 안정성 때문에 절대 줄지 않는다.
+// 매 프레임 전체를 훑으면 오래 플레이할수록 프레임이 길어지다 결국 멈춘 것처럼 보인다.
+// 정리(culled)된 앞쪽 구간은 건너뛰도록 시작 인덱스를 단조 증가시킨다.
+let platFrom=0, itemFrom=0;
+function platStart(){ return (standingOnIdx>=0 && standingOnIdx<platFrom) ? standingOnIdx : platFrom; }
 let elevatorMesh=null, elevatorActive=false, elevatorTargetY=0, elevatorDestIdx=-1, elevatorY=0;
 // 엘리베이터 3D 경로 보간(현재 위치 → 목표 발판 위)
 let elevSX=0,elevSY=0,elevSZ=0, elevDX=0,elevDY=0,elevDZ=0, elevT=0, elevDur=1;
@@ -3302,6 +3307,7 @@ function clearScene(){
     if(entry.fmat) entry.fmat.dispose();
   });
   platMeshes=[];itemMeshes=[];platforms=[];items=[];
+  platFrom=0; itemFrom=0;   // 배열을 비웠으면 '건너뛰기 시작 인덱스'도 반드시 함께 초기화(안 하면 새 판에서 앞쪽 발판이 통째로 무시된다)
   checkpoints=[];cpMeshes=[];cpIdx=-1;
   elevatorActive=false; elevatorTargetY=0; elevatorDestIdx=-1; elevatorY=0;
 }
@@ -3415,8 +3421,8 @@ function genPlatform(i){
   const w=Math.max(1.5, 3.2 - difficulty*1.5 - extra*0.5 + Math.random()*1.4);   // 높이 오를수록 더 좁게
   const d=Math.max(1.5, 2.8 - difficulty*1.1 - extra*0.5 + Math.random()*1.4);
 
-  // 25칸마다 체크포인트 발판 — 무한·타임어택은 체크포인트 없음
-  const isCheckpoint = !endless && gameMode!=='stage' && (i % 25 === 0);
+  // 25칸마다 체크포인트 발판 — 무한 등반 모드에서만. 다른 모드는 체크포인트 없이 순수 실력으로.
+  const isCheckpoint = endless && (i % 25 === 0);
   const moving = (gameMode==='normal'||gameMode==='stage') && !isCheckpoint && i>8 && Math.random() < 0.18 + difficulty * 0.22 + extra * 0.20;   // 높이 오를수록 흔들리는 발판 증가
 
   // 특수 발판 배정. 초반 5칸·움직임·체크포인트 발판은 제외(시작은 항상 안전).
@@ -3463,6 +3469,7 @@ function genPlatform(i){
 
 function genMap(){
   clearScene();
+  platFrom=0; itemFrom=0;
   const start={x:0,y:0,z:0,w:10,h:1.0,d:10,ci:0,moving:false,ox:0,prevX:0,amp:0,phase:0,kind:'normal',dirX:0,dirZ:0,cstate:'solid',ctimer:0,culled:false};
   platforms.push(start); platMeshes.push(makePlat(start));
   // 무한·타임어택 모드는 초기 55칸(이후 스트리밍) / 그 외 200칸
@@ -3490,7 +3497,7 @@ function extendEndless(){
   // 예전에는 죽음선 6 아래부터 지워서, 내려다보면 발판이 눈앞에서 사라진 것처럼 보였다.
   // 죽음선 아래는 어차피 갈 수 없는 구간이지만 '보이기는 해야' 하므로 여유를 크게 둔다.
   const CULL_BELOW = 150;
-  for(let i=0;i<platforms.length;i++){
+  for(let i=platStart();i<platforms.length;i++){
     const p=platforms[i];
     if(p.culled || i===standingOnIdx) continue;
     if(p.y < deathFloor - CULL_BELOW){
@@ -3504,8 +3511,10 @@ function extendEndless(){
       p.culled=true;
     }
   }
+  // 정리가 끝난 앞쪽 구간은 이후 모든 순회에서 건너뛴다(프레임 시간이 계속 늘어나는 것 방지).
+  while(platFrom < platforms.length-1 && platforms[platFrom].culled) platFrom++;
   // 아이템도 같이 정리 — 안 하면 발판만 사라지고 코인·아이템이 허공에 떠 있게 된다.
-  for(let i=0;i<items.length;i++){
+  for(let i=itemFrom;i<items.length;i++){
     const it=items[i];
     if(!it.alive) continue;
     if(it.y < deathFloor - CULL_BELOW){
@@ -3519,6 +3528,7 @@ function extendEndless(){
       }
     }
   }
+  while(itemFrom < items.length-1 && !items[itemFrom].alive) itemFrom++;
 }
 
 // 플레이어 메시
@@ -3707,7 +3717,8 @@ let coins=0, height=0, bestH=0;
 let endlessBest=0, deathFloor=-10;   // ♾️ 무한 모드: 전용 최고기록 + 플레이어를 따라오르는 죽음 바닥
 let stageLevel=1, stageTimeLeft=0, stageBest=0, nextStageY=0;   // ⏱️ 타임어택(무한): 현재 단계 / 남은시간 / 최고 단계 / 다음 단계 높이
 const STAGE_STEP=35, STAGE_TIME_BONUS=9, STAGE_INIT_TIME=25;    // 단계 높이 간격 / 돌파 시 시간보너스(초) / 시작 제한시간(초)
-const elevatorCost=100, elevatorRise=200;   // 코인 100개 = 1회 탑승. 시작점 위 약 200 높이의 실제 코스 발판까지
+const elevatorCost=100, elevatorRise=200;   // 200칸 엘리베이터: 코인 100 = 1회 탑승, 시작점 위 약 200 높이의 실제 코스 발판까지
+const elevatorNeedClimb=200;                // 해금 조건: 엘리베이터 없이 직접 이 높이까지 등반
 const storageKey='SIWOO_bestH';
 const coinStorageKey='SIWOO_coins';
 const climbKey='SIWOO_bestClimb';   // 엘리베이터 없이 직접 올라간 최고 높이(칸) — 100/200칸 엘리베이터 해금 조건
@@ -3732,13 +3743,14 @@ function loadLoadout(){
   catch(e){return {glide:0,jump:0,fly:0,slow:0,revive:0,shield:0};}
 }
 function saveLoadout(){try{localStorage.setItem(loadoutKey,JSON.stringify(loadout));}catch(e){}}
+const REVIVE_MAX=2;   // 부활권은 한 번에 2개까지만 보유 가능(비싼 대신 확실한 보험)
 const SHOP=[
   {key:'glide',  name:'글라이드',  icon:'🪂', price:3,  color:'#88ffcc'},
   {key:'jump',   name:'점프 장치', icon:'⬆', price:2,  color:'#ff6600'},
   {key:'fly',    name:'비행 장치', icon:'✈', price:2,  color:'#00aaff'},
   {key:'slow',   name:'슬로우',    icon:'🐢', price:2,  color:'#88bbff'},
   {key:'shield', name:'보호막',    icon:'🛡', price:3,  color:'#7fd0ff'},
-  {key:'revive', name:'부활권',    icon:'❤', price:5,  color:'#ff5577'}
+  {key:'revive', name:'부활권',    icon:'❤', price:50, color:'#ff5577', max:REVIVE_MAX}
 ];
 
 // ── 영구 업그레이드 시스템 추가: 데이터 정의 ──
@@ -4048,7 +4060,14 @@ document.addEventListener('mousemove',e=>{
   pitch  = Math.max(pLo, Math.min(1.5, pitch));     // 거의 수직 위/아래까지 (발밑·하늘 보기)
 });
 
+// 스킬·엘리베이터·체크포인트는 무한 등반 모드 전용. 다른 모드는 순수 실력으로만.
+function endlessOnly(label){
+  if(gameMode==='endless') return true;
+  showPickup('🔒 '+label+' — 무한 등반 모드에서만 사용 가능');
+  return false;
+}
 function useGlide(){
+  if(!endlessOnly('글라이드')) return;
   if(inv.glide>0){
     inv.glide--; eff.glide=240;   // 약 4초간 낙하 속도 대폭 감소
     mrun.usedGlide=true;          // 미션: 글라이드 사용 기록
@@ -4058,10 +4077,12 @@ function useGlide(){
   } else showPickup('글라이드 없음');
 }
 function useJump(){
+  if(!endlessOnly('점프 장치')) return;
   if(inv.jump>0){inv.jump--;eff.jump=180;mrun.usedJump=true;doFlash('rgba(255,120,0,.35)');showPickup('점프 모드 3초 활성화');updateInv();}   // 미션: 점프 스킬 사용 기록
   else showPickup('점프 장치 없음');
 }
 function useFly(){
+  if(!endlessOnly('비행')) return;
   if(flyCd>0){
     showPickup('비행 쿨타임 '+Math.ceil(flyCd/60)+'초');
     return;
@@ -4074,6 +4095,7 @@ function useFly(){
   } else showPickup('비행 장치 없음');
 }
 function useSlow(){
+  if(!endlessOnly('슬로우')) return;
   if(inv.slow>0){
     inv.slow--; eff.slow=240;
     doFlash('rgba(120,180,255,.30)');
@@ -4090,10 +4112,16 @@ function canUseElevator(){
 // (예전엔 시작점 바로 위 외딴 발판으로 수직 상승해서 고립됐음)
 function findElevatorLanding(rise){
   const desiredY = py + rise;
+  // ♾️/⏱️ 무한·타임어택은 발판을 필요한 만큼만 스트리밍한다(시작 시 55칸 ≈ 높이 81).
+  // 목표 높이까지 미리 만들어 두지 않으면 100칸·200칸 엘리베이터가 "제일 높은 발판"인 81에 내려준다.
+  if(gameMode==='endless' || gameMode==='stage'){
+    let g=0;
+    while(platforms[platforms.length-1].y < desiredY + 8 && g++ < 4000) genPlatform(platforms.length);
+  }
   let best = null, bestDist = Infinity;
-  for(let i=0;i<platforms.length;i++){
+  for(let i=platStart();i<platforms.length;i++){
     const p = platforms[i];
-    if(i===0) continue;                                    // 시작 발판 제외
+    if(i===0 || p.culled) continue;                        // 시작 발판·정리된 발판 제외
     if(p.kind==='hazard' || p.kind==='crumble') continue;  // 즉사/붕괴 제외
     if(p.moving) continue;                                  // 움직이는 발판 제외
     const topY = p.y + p.h/2;
@@ -4104,10 +4132,7 @@ function findElevatorLanding(rise){
   return best;
 }
 function useElevatorTier(rise, cost, needClimb, label){
-  if(gameMode==='electric'){
-    showPickup('⚡ 전기 모드에선 엘리베이터 사용 불가');
-    return;
-  }
+  if(!endlessOnly('엘리베이터')) return;
   if(!canUseElevator()){
     showPickup('시작 지점에서만 엘리베이터 사용 가능');
     return;
@@ -4143,9 +4168,8 @@ function useElevatorTier(rise, cost, needClimb, label){
   showPickup(label+' 탑승 중...');
   updateHUD(); updateInv();
 }
-// R: 100칸 엘리베이터(50코인, 직접 100칸 등반 시 해금) / T: 200칸 엘리베이터(100코인, 직접 200칸 등반 시 해금)
-function useElevator(){ useElevatorTier(100, 50, 100, '100칸 엘리베이터'); }
-function useElevator200(){ useElevatorTier(200, 100, 200, '200칸 엘리베이터'); }
+// R: 200칸 엘리베이터(100코인) — 엘리베이터 없이 직접 200칸 등반해야 해금. 엘리베이터는 이것 하나뿐.
+function useElevator(){ useElevatorTier(elevatorRise, elevatorCost, elevatorNeedClimb, elevatorRise+'칸 엘리베이터'); }
 function doJump(){
   if(jumpsLeft>0){vy = (eff.jump>0 ? 0.30 : 0.22) * (1+0.03*(upgrades.jump||0)); jumpsLeft--; sfxJump(jumpsLeft===0?1.18:1); burst(px,py,pz,7, 0.55,0.92,1.0);}   // 점프력 증가 업그레이드 적용
 }
@@ -4185,7 +4209,6 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyZ') gateAbil('fly',useFly,'비행');
   if(e.code==='KeyC') gateAbil('slow',useSlow,'슬로우');
   if(e.code==='KeyR') gateAbil('elev',useElevator,'엘리베이터');
-  if(e.code==='KeyT') gateAbil('elev',useElevator200,'엘리베이터');
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
@@ -4306,8 +4329,9 @@ function renderShop(){
     card.innerHTML=
       '<div class="si-icon" style="color:'+it.color+'">'+it.icon+'</div>'+
       '<div class="si-name">'+it.name+'</div>'+
-      '<div class="si-own">보유 x'+(loadout[it.key]||0)+'</div>'+
-      '<button class="si-buy"'+(coins<it.price?' disabled':'')+'>'+it.price+' 💰</button>';
+      '<div class="si-own">보유 x'+(loadout[it.key]||0)+(it.max?' / 최대 '+it.max:'')+'</div>'+
+      '<button class="si-buy"'+((coins<it.price||(it.max&&(loadout[it.key]||0)>=it.max))?' disabled':'')+'>'+
+        ((it.max&&(loadout[it.key]||0)>=it.max)?'최대':it.price+' 💰')+'</button>';
     card.querySelector('.si-buy').addEventListener('click',()=>buyItem(it.key));
     box.appendChild(card);
   });
@@ -4315,7 +4339,7 @@ function renderShop(){
 function buyItem(key){
   const it=SHOP.find(s=>s.key===key);
   if(!it || coins<it.price) return;
-  if(key==='revive' && gameMode==='electric' && (loadout.revive||0)>=1){ showPickup('⚡ 전기 모드: 부활 1개만'); return; }
+  if(it.max && (loadout[key]||0)>=it.max){ showPickup('🔒 '+it.name+'은 최대 '+it.max+'개까지'); return; }
   coins-=it.price; saveCoins();
   loadout[key]=(loadout[key]||0)+1; saveLoadout();
   renderShop(); updateHUD(); updateInv();
@@ -4334,8 +4358,9 @@ function renderShopModal(){
     card.innerHTML=
       '<div class="si-icon" style="color:'+it.color+'">'+it.icon+'</div>'+
       '<div class="si-name">'+it.name+'</div>'+
-      '<div class="si-own">보유 x'+ownedLive(it.key)+'</div>'+
-      '<button class="si-buy"'+(coins<it.price?' disabled':'')+'>'+it.price+' 💰</button>';
+      '<div class="si-own">보유 x'+ownedLive(it.key)+(it.max?' / 최대 '+it.max:'')+'</div>'+
+      '<button class="si-buy"'+((coins<it.price||(it.max&&ownedLive(it.key)>=it.max))?' disabled':'')+'>'+
+        ((it.max&&ownedLive(it.key)>=it.max)?'최대':it.price+' 💰')+'</button>';
     card.querySelector('.si-buy').addEventListener('click',()=>buyLive(it.key));
     box.appendChild(card);
   });
@@ -4343,7 +4368,7 @@ function renderShopModal(){
 function buyLive(key){
   const it=SHOP.find(s=>s.key===key);
   if(!it || coins<it.price) return;
-  if(key==='revive' && gameMode==='electric' && reviveStock>=1){ showPickup('⚡ 전기 모드: 부활 1개만'); return; }
+  if(it.max && ownedLive(key)>=it.max){ showPickup('🔒 '+it.name+'은 최대 '+it.max+'개까지'); return; }
   coins-=it.price; saveCoins();
   if(key==='revive') reviveStock++; else if(key==='shield') shieldStock++; else inv[key]++;
   renderShopModal(); updateHUD(); updateInv();
@@ -4464,7 +4489,7 @@ function beginRun(){
   inv={glide:loadout.glide + (upgrades.glide||0), jump:loadout.jump, fly:loadout.fly, slow:loadout.slow};
   reviveStock=loadout.revive;
   shieldStock=loadout.shield||0;
-  if(gameMode==='electric') reviveStock=Math.min(1,reviveStock);   // 전기 모드: 부활 1회만
+  reviveStock=Math.min(REVIVE_MAX,reviveStock);   // 부활권 보유 상한
   loadout={glide:0,jump:0,fly:0,slow:0,revive:0,shield:0}; saveLoadout();
   resetMissionRun(); initMissions();      // 미션 시스템: 판 시작 시 랜덤 미션 3개 생성
   usedElevatorThisRun=false;              // 🛗 새 판 시작 — '직접 등반' 판정 초기화
@@ -4620,7 +4645,7 @@ const CROUCH_HEIGHT=1.4;
 function resolveCollisions(){
   onGround=false;
   standingOnIdx=-1;
-  for(let pi=0;pi<platforms.length;pi++){
+  for(let pi=platStart();pi<platforms.length;pi++){
     const p=platforms[pi];
     if(p.cstate==='gone') continue; // 무너져 사라진 발판은 충돌 없음
     if(p.culled) continue;          // ♾️ 무한 모드: 정리된 먼 발판은 충돌 없음
@@ -4736,7 +4761,7 @@ function update(){
   }
 
   // 움직이는 발판 + 붕괴 발판 업데이트
-  for(let i=0;i<platforms.length;i++){
+  for(let i=platStart();i<platforms.length;i++){
     const p=platforms[i];
     if(p.culled) continue;          // ♾️ 무한 모드: 메시가 정리된 발판은 건너뜀(널 참조 방지)
     if(p.kind==='electric'){
@@ -4897,7 +4922,7 @@ function update(){
   }
 
   // 아이템 충돌
-  for(let i=0;i<items.length;i++){
+  for(let i=itemFrom;i<items.length;i++){
     const it=items[i];
     if(!it.alive) continue;
     it.ang+=0.05;
@@ -5008,9 +5033,9 @@ function update(){
   drawStick(mode, animPhase, skEye);
   // 착지 예측 그림자: 플레이어 바로 아래에서 가장 가까운 발판 윗면에 투영
   let shY=null;
-  for(let i=0;i<platforms.length;i++){
+  for(let i=platStart();i<platforms.length;i++){
     const p=platforms[i];
-    if(p.cstate==='gone') continue;
+    if(p.cstate==='gone' || p.culled) continue;
     if(px>=p.x-p.w/2 && px<=p.x+p.w/2 && pz>=p.z-p.d/2 && pz<=p.z+p.d/2){
       const topY=p.y+p.h/2;
       if(topY<=py+0.06 && (shY===null || topY>shY)) shY=topY;

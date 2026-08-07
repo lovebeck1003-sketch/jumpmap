@@ -48,6 +48,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass   # 콘솔 조용히
 
+    def end_headers(self):
+        # 게임 파일을 고칠 때마다 브라우저가 옛날 버전을 캐시해서 헷갈리는 것 방지
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+
+class Server(socketserver.ThreadingTCPServer):
+    """연결마다 스레드 — 브라우저가 keep-alive 로 연결을 붙들고 있어도 다른 요청이 막히지 않는다.
+    (예전 TCPServer 는 한 번에 한 연결만 처리해서, 탭을 열어두면 서버가 먹통처럼 보였다.)"""
+    daemon_threads = True
+    allow_reuse_address = True
+
 
 def main():
     page = pick_page()
@@ -60,7 +72,7 @@ def main():
     port = PORT
     for _ in range(10):
         try:
-            httpd = socketserver.TCPServer(("127.0.0.1", port), Handler)
+            httpd = Server(("127.0.0.1", port), Handler)
             break
         except OSError:
             port += 1
